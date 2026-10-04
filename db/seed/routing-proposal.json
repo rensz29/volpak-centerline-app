@@ -1,0 +1,18 @@
+{
+  "$comment": "Starting point for the first routing version (ADR-0023), shown on the Notifications tab before anything is saved. Management gets every kind of message on both channels. The recipients are placeholders until IT gives the real Teams channel and addresses (O-05): replace them before activating, or nothing will arrive.",
+  "source": "Phase 2 proposal (ADR-0023)",
+  "rules": [
+    {
+      "name": "Management on Teams",
+      "types": ["hmi_mismatch", "actual_warning", "actual_critical", "critical_repeat", "critical_escalation", "recovery", "changeover", "reason_overdue", "system"],
+      "channel": "teams",
+      "targets": ["Centerline alerts (placeholder channel)"]
+    },
+    {
+      "name": "Management by email",
+      "types": ["hmi_mismatch", "actual_warning", "actual_critical", "critical_repeat", "critical_escalation", "recovery", "changeover", "reason_overdue", "system"],
+      "channel": "email",
+      "targets": ["management@example.invalid"]
+    }
+  ]
+}

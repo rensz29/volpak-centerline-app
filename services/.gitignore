@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+.pytest_cache/
+api/config.json
+api/logs/
+notifier/config.json

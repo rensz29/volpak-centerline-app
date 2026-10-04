@@ -1,0 +1,188 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* ==========================================================================
+   Digital Centerline — design tokens
+   Industrial production-monitoring palette: navy chrome, light-gray canvas,
+   white cards, and a four-state process-status system. Components must use
+   these semantic names, never raw palette values such as `bg-blue-600`.
+   ========================================================================== */
+
+@theme {
+  /* --- Typography ------------------------------------------------------- */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* --- Navy chrome (sidebar + header) ----------------------------------- */
+  --color-nav: #0f172a;
+  --color-nav-raised: #16233a;
+  --color-nav-hover: #1e293b;
+  --color-nav-active: #1e3a8a;
+  --color-nav-border: #1e293b;
+  --color-nav-fg: #94a3b8;
+  --color-nav-fg-strong: #f8fafc;
+  --color-nav-accent: #3b82f6;
+
+  /* --- Surfaces --------------------------------------------------------- */
+  --color-canvas: #f1f5f9;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f8fafc;
+  --color-surface-selected: #eff6ff;
+
+  /* --- Text ------------------------------------------------------------- */
+  --color-ink: #0f172a;
+  --color-ink-soft: #475569;
+  --color-ink-muted: #94a3b8;
+
+  /* --- Lines ------------------------------------------------------------ */
+  --color-line: #e2e8f0;
+  --color-line-soft: #f1f5f9;
+
+  /* --- Primary action --------------------------------------------------- */
+  --color-brand: #1d4ed8;
+  --color-brand-hover: #1e40af;
+  --color-brand-ring: #3b82f6;
+  --color-brand-surface: #eff6ff;
+
+  /* --- Process status: normal ------------------------------------------- */
+  --color-normal: #15803d;
+  --color-normal-surface: #dcfce7;
+  --color-normal-border: #bbf7d0;
+  --color-normal-solid: #16a34a;
+
+  /* --- Process status: warning ------------------------------------------ */
+  --color-warning: #b45309;
+  --color-warning-surface: #fef3c7;
+  --color-warning-border: #fde68a;
+  --color-warning-solid: #d97706;
+
+  /* --- Process status: critical ----------------------------------------- */
+  --color-critical: #b91c1c;
+  --color-critical-surface: #fee2e2;
+  --color-critical-border: #fecaca;
+  --color-critical-solid: #dc2626;
+
+  /* --- Process status: no data ------------------------------------------ */
+  --color-nodata: #475569;
+  --color-nodata-surface: #f1f5f9;
+  --color-nodata-border: #e2e8f0;
+  --color-nodata-solid: #64748b;
+
+  /* --- Chart series (fixed semantic meaning, never reassigned) ----------- */
+  --color-series-actual: #2563eb;
+  --color-series-hmi: #ea580c;
+  --color-series-target: #16a34a;
+  --color-series-tolerance: #fca5a5;
+  --color-series-alarm: #dc2626;
+
+  /* --- Qualitative ramp for SKU categories (grayscale-separable) --------- */
+  --color-cat-1: #2563eb;
+  --color-cat-2: #7c3aed;
+  --color-cat-3: #0891b2;
+  --color-cat-4: #c2410c;
+  --color-cat-5: #4d7c0f;
+
+  /* --- Shape ------------------------------------------------------------ */
+  --radius-card: 8px;
+  --radius-control: 6px;
+
+  /* --- Elevation: restrained; depth comes from borders, not blur -------- */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.06), 0 1px 3px rgb(15 23 42 / 0.04);
+  --shadow-raised: 0 2px 4px rgb(15 23 42 / 0.06), 0 4px 12px rgb(15 23 42 / 0.08);
+  --shadow-overlay: 0 8px 24px rgb(15 23 42 / 0.12), 0 2px 8px rgb(15 23 42 / 0.08);
+}
+
+/* --------------------------------------------------------------------------
+   shadcn/ui primitive tokens, mapped onto the industrial palette above so the
+   vendored components inherit this design system rather than the default one.
+   -------------------------------------------------------------------------- */
+@theme inline {
+  --color-background: var(--color-canvas);
+  --color-foreground: var(--color-ink);
+  --color-card: var(--color-surface);
+  --color-card-foreground: var(--color-ink);
+  --color-popover: var(--color-surface);
+  --color-popover-foreground: var(--color-ink);
+  --color-primary: var(--color-brand);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--color-surface-muted);
+  --color-secondary-foreground: var(--color-ink);
+  --color-muted: var(--color-surface-muted);
+  --color-muted-foreground: var(--color-ink-soft);
+  --color-accent: var(--color-surface-muted);
+  --color-accent-foreground: var(--color-ink);
+  --color-destructive: var(--color-critical-solid);
+  --color-destructive-foreground: #ffffff;
+  --color-border: var(--color-line);
+  --color-input: var(--color-line);
+  --color-ring: var(--color-brand-ring);
+  --radius-lg: var(--radius-card);
+  --radius-md: var(--radius-control);
+  --radius-sm: 4px;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans text-sm antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04';
+  }
+
+  /* Process values must align digit-for-digit down a column; proportional
+     figures make deviations impossible to compare at a glance. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  :focus-visible {
+    @apply outline-brand-ring outline-2 outline-offset-2;
+  }
+
+  /* Scrollbars sized for touch, tinted to the chrome rather than the OS. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-surface-muted);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 6px;
+    border: 2px solid var(--color-surface-muted);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+  ::-webkit-scrollbar-corner {
+    background: var(--color-surface-muted);
+  }
+}
+
+@layer components {
+  /* The recurring 11px uppercase label used for field names and column
+     groups; a core part of the industrial (not admin-template) voice. */
+  .micro-label {
+    @apply text-ink-muted text-[11px] font-semibold tracking-[0.06em] uppercase;
+  }
+}
+
+/* Motion is functional only: no decorative animation anywhere in the app. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

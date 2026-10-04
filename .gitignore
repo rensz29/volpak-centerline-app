@@ -1,0 +1,25 @@
+# Never pushed: secrets, local settings, runtime data and build output.
+# config/, services/, client/ and tools/ have their own .gitignore for the rest
+# (config/secrets/, config/connections.json, config/history/, services/api/config.json, …).
+
+# monitor-core's disk journal (RES-01): steps not yet written to the database
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Node
+node_modules/
+
+# Database dumps and environment files
+*.dump
+.env
+.env.*
+
+# Editors and OS
+.idea/
+.DS_Store
+Thumbs.db

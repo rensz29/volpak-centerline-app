@@ -1,0 +1,22 @@
+{
+  "host": "REPLACE_BROKER_HOST",
+  "port": 8883,
+  "protocol": "5",
+  "tls": {
+    "enabled": true,
+    "ca_file": "~/.secrets/plant-ca.pem",
+    "cert_file": null,
+    "key_file": null,
+    "verify_hostname": true
+  },
+  "username": "REPLACE_READ_ONLY_USER",
+  "password_file": "~/.secrets/mqtt-password",
+  "client_id": "",
+  "keepalive_s": 10,
+
+  "subscriptions": [
+    "Unilever_Ph_Nutrition/Dressings_Halal/Filling/Volpak/Filler/#"
+  ],
+  "register": "../../config/parameter-register.json",
+  "listen_s": 600
+}

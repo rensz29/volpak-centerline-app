@@ -1,0 +1,19 @@
+{
+  "base_url": "http://10.156.116.179:4516",
+  "dataset": "dressings",
+  "verify_tls": true,
+  "timeout_s": 60,
+
+  "auth": {
+    "type": "bearer",
+    "token_file": "~/.secrets/timebase-token",
+    "_types": "none | bearer (token_file) | basic (username + password_file) | header (header_name + token_file)"
+  },
+
+  "register": "../../config/parameter-register.json",
+
+  "good_quality_min": 192,
+  "fetch_window_s": 3600,
+  "group_size": 10,
+  "min_window_s": 60
+}

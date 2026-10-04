@@ -1,0 +1,232 @@
+{
+  "sku": {
+    "tag": null,
+    "note": "Decided in ADR-0007: the edge/UNS team adds the running SKU/recipe to the machine's MQTT payload. Until then monitoring pauses on the real machine (OPC-08); development uses tools/mqtt-sim.",
+    "status": "awaiting_tag"
+  },
+  "line": {
+    "id": "VOLPAK-FILLER",
+    "name": "Volpak Filler, Dressings Halal"
+  },
+  "version": "2026-09-30.2",
+  "$comment": [
+    "Parameter register: the single source of truth for what Centerline monitors (ADR-0007).",
+    "Parameters keep their URS IDs (P01-P11). A parameter has one or more zones; each zone is a",
+    "setpoint/actual tag pair with its own events. Only parameters with status 'active' are monitored.",
+    "Tag names are relative to 'namespace'; the full Timebase tag is namespace + '.' + tag.",
+    "The MQTT topic/field for each tag is discovered by tools/mqtt-probe and written to its topic map.",
+    "Status 'awaiting_tag': the parameter is in the URS but the machine doesn't publish its tags yet.",
+    "Status 'analytics_only': an actual tag exists but no setpoint, so it can be X or Y in Analytics but isn't monitored."
+  ],
+  "namespace": "Unilever_Ph_Nutrition.Dressings_Halal.Filling.Volpak.Filler",
+  "parameters": [
+    {
+      "id": "P01",
+      "name": "Sealing Temperature",
+      "note": "Not in the machine tag list. Confirm whether P01 is a separate measurement or already covered by Top/Bottom/Vertical.",
+      "unit": "°C",
+      "zones": [],
+      "status": "awaiting_tag"
+    },
+    {
+      "id": "P02",
+      "name": "Vertical Temperature",
+      "unit": "°C",
+      "zones": [
+        {
+          "id": "V1",
+          "name": "Vertical 1",
+          "actual": "SPC.Actual_Temp_Vertical_1",
+          "setpoint": "SPC.SetPointTemperatureVertical1"
+        },
+        {
+          "id": "V2",
+          "name": "Vertical 2",
+          "actual": "SPC.Actual_Temp_Vertical_2",
+          "setpoint": "SPC.SetPointTemperatureVertical2"
+        },
+        {
+          "id": "V3",
+          "name": "Vertical 3",
+          "actual": "SPC.Actual_Temp_Vertical_3",
+          "setpoint": "SPC.SetPointTemperatureVertical3"
+        },
+        {
+          "id": "V4",
+          "name": "Vertical 4",
+          "actual": "SPC.Actual_Temp_Vertical_4",
+          "setpoint": "SPC.SetPointTemperatureVertical4"
+        },
+        {
+          "id": "V5",
+          "name": "Vertical 5",
+          "actual": "SPC.Actual_Temp_Vertical_5",
+          "setpoint": "SPC.SetPointTemperatureVertical5"
+        },
+        {
+          "id": "V6",
+          "name": "Vertical 6",
+          "actual": "SPC.Actual_Temp_Vertical_6",
+          "setpoint": "SPC.SetPointTemperatureVertical6"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "id": "P03",
+      "name": "Bottom Temperature",
+      "unit": "°C",
+      "zones": [
+        {
+          "id": "FRONT",
+          "name": "Front bottom",
+          "actual": "SPC.Actual_Temp_Front_Bottom_1",
+          "setpoint": "SPC.SetPointTemperatureFrontBottom"
+        },
+        {
+          "id": "REAR",
+          "name": "Rear bottom",
+          "actual": "SPC.Actual_Temp_Rear_Bottom_1",
+          "setpoint": "SPC.SetPointTemperatureRearBottom"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "id": "P04",
+      "name": "Top Temperature",
+      "note": "SPC.Actual_Temp_Front_Top_2 / Rear_Top_2 exist but read 0 and have no setpoint tag: not monitored.",
+      "unit": "°C",
+      "zones": [
+        {
+          "id": "FRONT",
+          "name": "Front top 1",
+          "actual": "SPC.Actual_Temp_Front_Top_1",
+          "setpoint": "SPC.SetPointTemperatureFrontTop1"
+        },
+        {
+          "id": "REAR",
+          "name": "Rear top 1",
+          "actual": "SPC.Actual_Temp_Rear_Top_1",
+          "setpoint": "SPC.SetPointTemperatureRearTop1"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "id": "P05",
+      "name": "Hopper Pressure",
+      "note": "Not in the machine tag list. Dosing_Parameters.Hopper_Lvl exists but is a level, not a pressure.",
+      "unit": "bar",
+      "zones": [],
+      "status": "awaiting_tag"
+    },
+    {
+      "id": "P06",
+      "name": "Discharge Point",
+      "note": "Labelled 'Discharge Pressure' in the machine tag list; the URS calls it Discharge Point (no unit). Values seen: 98, 217, 219.",
+      "unit": null,
+      "zones": [
+        {
+          "id": "N1",
+          "name": "Nozzle 1",
+          "actual": "Dosing_Parameters.Nozzle_1_Discharge_Actual",
+          "setpoint": "Dosing_Parameters.Nozzle_1_Discharge_Setpoint"
+        },
+        {
+          "id": "N2",
+          "name": "Nozzle 2",
+          "actual": "Dosing_Parameters.Nozzle_2_Discharge_Actual",
+          "setpoint": "Dosing_Parameters.Nozzle_2_Discharge_Setpoint"
+        },
+        {
+          "id": "N3",
+          "name": "Nozzle 3",
+          "actual": "Dosing_Parameters.Nozzle_3_Discharge_Actual",
+          "setpoint": "Dosing_Parameters.Nozzle_3_Discharge_Setpoint"
+        }
+      ],
+      "status": "active"
+    },
+    {
+      "id": "P07",
+      "name": "Discharge Time",
+      "note": "Not in the machine tag list.",
+      "unit": "ms",
+      "zones": [],
+      "status": "awaiting_tag"
+    },
+    {
+      "id": "P08",
+      "name": "Machine Speed",
+      "note": "Actual only (SPC.Machine_Speed, 40-43 seen). Usable in Analytics (ADR-0008); a setpoint tag is needed before HMI monitoring is possible.",
+      "unit": "ppm",
+      "zones": [
+        {
+          "id": "MAIN",
+          "name": "Machine speed",
+          "actual": "SPC.Machine_Speed",
+          "setpoint": null
+        }
+      ],
+      "status": "analytics_only"
+    },
+    {
+      "id": "P09",
+      "name": "Pressure",
+      "unit": "bar",
+      "zones": [
+        {
+          "id": "MAIN",
+          "name": "Dosing pressure",
+          "actual": "Dosing_Parameters.Pressure_Actual",
+          "setpoint": "Dosing_Parameters.Pressure_Setpoint"
+        }
+      ],
+      "status": "active",
+      "tag_review": "O-19: the tags look swapped at the source. 'Pressure_Setpoint' behaves like a sensor (about 21,000 changes a day, 213 values, 0 when stopped); 'Pressure_Actual' like an operator setting (about 35 changes a day, clean one-decimal values). With the two swapped and a 1-decimal comparison, P09 gives about 9 events a day at a 30 s delay, like the other parameters. Confirm on the HMI screen before changing this mapping.",
+      "hmi_match_review": "O-17: whole numbers are too coarse for a bar-scale value (1.2 and 1.3 bar both truncate to 1). Proposed: compare to 1 decimal. Needs the owner's decision (deviates from HMI-01)."
+    },
+    {
+      "id": "P10",
+      "name": "Feed",
+      "note": "SPC.Feed appeared in Timebase on 2026-09-29 02:26 UTC. It is a single tag (3000, unchanged since): it looks like a setpoint. An actual tag is needed before P10 can be monitored.",
+      "unit": "mm",
+      "zones": [
+        {
+          "id": "FEED1",
+          "name": "Feed",
+          "actual": "SPC.Feed",
+          "setpoint": null
+        }
+      ],
+      "status": "analytics_only",
+      "candidate_tags": []
+    },
+    {
+      "id": "P11",
+      "name": "Film Reel",
+      "note": "SPC.Film_Reel appeared in Timebase on 2026-09-29 02:26 UTC. It is a single tag (1427-1526, changes every few seconds in both directions): it looks like an actual. A setpoint tag is needed before P11 can be monitored.",
+      "unit": "m",
+      "zones": [
+        {
+          "id": "FILM_REEL",
+          "name": "Film Reel",
+          "setpoint": null,
+          "actual": "SPC.Film_Reel"
+        }
+      ],
+      "status": "analytics_only",
+      "candidate_tags": []
+    }
+  ],
+  "context_tags": {
+    "machine_run": "SPC.Machine_Run",
+    "machine_speed": "SPC.Machine_Speed"
+  },
+  "hmi_match_default": {
+    "note": "URS HMI-01: compare whole numbers, truncated toward zero",
+    "method": "truncate",
+    "decimals": 0
+  }
+}

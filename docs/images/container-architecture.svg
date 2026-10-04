@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 880" width="1320" height="880" role="img" aria-labelledby="title desc">
+  <title id="title">Container architecture: monitoring has its own path</title>
+  <desc id="desc">The Volpak edge publisher sends one JSON message per machine area to the plant MQTT broker. Timebase and monitor-core both subscribe to it. monitor-core writes to PostgreSQL or a disk journal. api, notifier, ai-worker, Ollama and backup-agent work from PostgreSQL and can stop without stopping monitoring.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b3b2a8"/>
+    </marker>
+    <style>
+      .box { fill: #ffffff; stroke: #c8c7bf; stroke-width: 2; }
+      .dashed { stroke-dasharray: 7 6; }
+      .core { fill: #e7f0fb; stroke: #2f6fd6; stroke-width: 3; }
+      .link { fill: none; stroke: #b3b2a8; stroke-width: 2.2; }
+      .t { font-family: Inter, "Segoe UI", Helvetica, Arial, sans-serif; fill: #1b1b1b; }
+      .h { font-size: 21px; font-weight: 600; }
+      .s { font-size: 17px; fill: #5b5b57; }
+      .note { font-size: 15px; fill: #6b6b66; }
+      .title { font-size: 23px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <rect width="1320" height="880" fill="#ffffff"/>
+  <text class="t title" x="42" y="50">Monitoring has its own path; AI and notifications can fail without stopping it</text>
+
+  <!-- workstation -->
+  <rect x="280" y="128" width="785" height="652" rx="14" fill="none" stroke="#c8c7bf" stroke-width="2"/>
+  <text class="t h" x="304" y="166">Control-room workstation · Docker host</text>
+
+  <!-- left column: plant side -->
+  <rect class="box" x="42" y="191" width="212" height="98" rx="12"/>
+  <text class="t h" x="148" y="233" text-anchor="middle">Timebase</text>
+  <text class="t s" x="148" y="262" text-anchor="middle">Historian REST</text>
+
+  <rect class="box" x="42" y="347" width="212" height="98" rx="12"/>
+  <text class="t h" x="148" y="389" text-anchor="middle">MQTT broker</text>
+  <text class="t s" x="148" y="418" text-anchor="middle">plant UNS</text>
+
+  <rect class="box" x="42" y="502" width="212" height="98" rx="12"/>
+  <text class="t h" x="148" y="544" text-anchor="middle">Volpak edge</text>
+  <text class="t s" x="148" y="573" text-anchor="middle">JSON per area</text>
+
+  <rect class="box" x="42" y="658" width="212" height="98" rx="12"/>
+  <text class="t h" x="148" y="700" text-anchor="middle">Backup share</text>
+  <text class="t s" x="148" y="729" text-anchor="middle">off-host</text>
+
+  <!-- inside: monitoring path -->
+  <rect class="core" x="305" y="347" width="212" height="98" rx="12"/>
+  <text class="t h" x="411" y="389" text-anchor="middle">monitor-core</text>
+  <text class="t s" x="411" y="418" text-anchor="middle">rules · timers</text>
+
+  <rect class="box" x="305" y="502" width="212" height="98" rx="12"/>
+  <text class="t h" x="411" y="544" text-anchor="middle">Disk journal</text>
+  <text class="t s" x="411" y="573" text-anchor="middle">30-min buffer</text>
+
+  <rect class="box dashed" x="305" y="658" width="212" height="98" rx="12"/>
+  <text class="t h" x="411" y="700" text-anchor="middle">backup-agent</text>
+  <text class="t s" x="411" y="729" text-anchor="middle">hourly · daily</text>
+
+  <rect class="box" x="566" y="191" width="212" height="565" rx="12"/>
+  <text class="t h" x="672" y="402" text-anchor="middle">PostgreSQL</text>
+  <text class="t s" x="672" y="435" text-anchor="middle">+ pgvector</text>
+  <text class="t s" x="672" y="467" text-anchor="middle">events · audit</text>
+  <text class="t s" x="672" y="499" text-anchor="middle">outbox · config</text>
+  <text class="t s" x="672" y="531" text-anchor="middle">OCAP vectors</text>
+  <text class="t s" x="672" y="563" text-anchor="middle">users, sessions</text>
+
+  <!-- inside: services that may stop -->
+  <rect class="box" x="828" y="191" width="212" height="98" rx="12"/>
+  <text class="t h" x="934" y="233" text-anchor="middle">api</text>
+  <text class="t s" x="934" y="262" text-anchor="middle">REST, WebSocket</text>
+
+  <rect class="box dashed" x="828" y="347" width="212" height="98" rx="12"/>
+  <text class="t h" x="934" y="389" text-anchor="middle">notifier</text>
+  <text class="t s" x="934" y="418" text-anchor="middle">Teams · SMTP</text>
+
+  <rect class="box dashed" x="828" y="502" width="212" height="98" rx="12"/>
+  <text class="t h" x="934" y="544" text-anchor="middle">ai-worker</text>
+  <text class="t s" x="934" y="573" text-anchor="middle">OCAP retrieval</text>
+
+  <rect class="box dashed" x="828" y="658" width="212" height="98" rx="12"/>
+  <text class="t h" x="934" y="700" text-anchor="middle">Ollama</text>
+  <text class="t s" x="934" y="729" text-anchor="middle">pinned models</text>
+
+  <!-- right column: people and outbound -->
+  <rect class="box" x="1090" y="191" width="212" height="98" rx="12"/>
+  <text class="t h" x="1196" y="233" text-anchor="middle">Browsers</text>
+  <text class="t s" x="1196" y="262" text-anchor="middle">Edge · Chrome</text>
+
+  <rect class="box" x="1090" y="347" width="212" height="98" rx="12"/>
+  <text class="t h" x="1196" y="389" text-anchor="middle">MS Teams</text>
+  <text class="t s" x="1196" y="418" text-anchor="middle">Power Automate</text>
+
+  <rect class="box" x="1090" y="502" width="212" height="98" rx="12"/>
+  <text class="t h" x="1196" y="544" text-anchor="middle">SMTP relay</text>
+  <text class="t s" x="1196" y="573" text-anchor="middle">on-premises</text>
+
+  <!-- links -->
+  <path class="link" d="M148,502 V447" marker-end="url(#arrow)"/>
+  <path class="link" d="M148,347 V291" marker-end="url(#arrow)"/>
+  <text class="t note" x="160" y="324">recorded</text>
+  <path class="link" d="M148,191 V104 H934 V189" marker-end="url(#arrow)"/>
+  <text class="t note" x="541" y="94" text-anchor="middle">analytics history, GET-only REST</text>
+  <path class="link" d="M254,396 H303" marker-end="url(#arrow)"/>
+  <text class="t note" x="262" y="468">subscribe-only</text>
+  <path class="link" d="M262,452 L286,409" stroke-dasharray="3 3"/>
+  <path class="link" d="M517,396 H564" marker-end="url(#arrow)"/>
+  <path class="link" d="M411,445 V500" marker-end="url(#arrow)"/>
+  <path class="link" d="M517,551 H564" marker-end="url(#arrow)"/>
+  <path class="link" d="M566,707 H519" marker-end="url(#arrow)"/>
+  <path class="link" d="M305,707 H256" marker-end="url(#arrow)"/>
+  <path class="link" d="M780,240 H826" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <path class="link" d="M1042,240 H1088" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <path class="link" d="M780,396 H826" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <path class="link" d="M1040,396 H1088" marker-end="url(#arrow)"/>
+  <path class="link" d="M1040,425 H1076 V551 H1088" marker-end="url(#arrow)"/>
+  <path class="link" d="M780,551 H826" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <path class="link" d="M934,602 V656" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+
+  <!-- legend -->
+  <rect class="core" x="42" y="812" width="26" height="26" rx="5"/>
+  <text class="t s" x="80" y="832">Monitoring engine</text>
+  <rect class="box dashed" x="300" y="812" width="26" height="26" rx="5"/>
+  <text class="t s" x="338" y="832">Can stop without stopping monitoring</text>
+  <text class="t s" x="740" y="832">Arrows show the direction data moves</text>
+</svg>

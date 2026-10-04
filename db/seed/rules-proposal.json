@@ -1,0 +1,22 @@
+{
+  "$comment": "Starting point for the first rules version (ADR-0012), shown on the Rules tab before anything is saved. Delays: ADR-0002 (accepted by the owner on 2026-10-01). Limits: proposed from 28 days of Timebase history (ADR-0002; process engineering to confirm). Stop pause: ADR-0010. No targets: they come per SKU from process engineering.",
+  "source": "Phase 0 proposal (ADR-0002, ADR-0010)",
+  "settings": {
+    "pause_when_stopped": { "enabled": true, "long_stop_min": 10, "warmup_min": 30 },
+    "defaults": {
+      "mismatch_delay_s": 30,
+      "warning_delay_s": 30,
+      "critical_delay_s": 10,
+      "recovery_delay_s": 15,
+      "brief_change_mode": "lightweight",
+      "warning_notifications": true
+    }
+  },
+  "rules": [
+    { "sku": null, "parameter_id": "P02", "zone_id": null, "warn_low": 2, "warn_high": 1, "crit_low": 4, "crit_high": 2 },
+    { "sku": null, "parameter_id": "P03", "zone_id": null, "warn_low": 5, "warn_high": 5, "crit_low": 10, "crit_high": 10 },
+    { "sku": null, "parameter_id": "P04", "zone_id": null, "warn_low": 10, "warn_high": 9, "crit_low": 20, "crit_high": 18 },
+    { "sku": null, "parameter_id": "P06", "zone_id": null, "warn_low": 9, "warn_high": 9, "crit_low": 18, "crit_high": 18 },
+    { "sku": null, "parameter_id": "P09", "zone_id": null, "warn_low": 0.05, "warn_high": 0.05, "crit_low": 0.1, "crit_high": 0.1 }
+  ]
+}

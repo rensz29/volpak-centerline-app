@@ -1,0 +1,34 @@
+{
+    "base_url": "http://TIMEBASE-HOST:4511",
+    "dataset": "REPLACE_WITH_DATASET",
+    "verify_tls": true,
+    "timeout_s": 60,
+  
+    "auth": {
+      "type": "none",
+      "_types": "none | bearer (token_file) | basic (username + password_file) | header (header_name + token_file)",
+      "token_file": "~/.secrets/timebase-token",
+      "username": "",
+      "password_file": "~/.secrets/timebase-password",
+      "header_name": ""
+    },
+  
+    "good_quality_min": 192,
+    "fetch_window_s": 3600,
+  
+    "sku_tag": "REPLACE_SKU_TAG",
+    "parameters": {
+      "P01": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P02": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P03": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P04": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P05": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P06": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P07": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P08": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P09": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P10": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" },
+      "P11": { "hmi_tag": "REPLACE", "actual_tag": "REPLACE" }
+    }
+  }
+  
