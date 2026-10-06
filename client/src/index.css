@@ -68,6 +68,15 @@
   --color-nodata-border: #e2e8f0;
   --color-nodata-solid: #64748b;
 
+  /* --- Line view: the 3D machine on the navy chrome ---------------------- */
+  /* The status hues lightened to read on navy (all ≥ 6:1 on --color-nav); the
+     scene's floor and fog share --color-twin-floor. */
+  --color-twin-floor: #0b1220;
+  --color-normal-glow: #4ade80;
+  --color-warning-glow: #fbbf24;
+  --color-critical-glow: #f87171;
+  --color-nodata-glow: #94a3b8;
+
   /* --- Chart series (fixed semantic meaning, never reassigned) ----------- */
   --color-series-actual: #2563eb;
   --color-series-hmi: #ea580c;

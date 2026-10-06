@@ -31,6 +31,8 @@ export default defineConfig({
           groups: [
             { name: 'recharts', test: /node_modules[\\/](recharts|d3-|victory-|decimal\.js)/ },
             { name: 'echarts', test: /node_modules[\\/](echarts|zrender)[\\/]/ },
+            // three.js loads with the line view's 3D model only, never with the rest of the app (ADR-0033)
+            { name: 'three', test: /node_modules[\\/]three[\\/]/ },
             { name: 'react', test: /node_modules[\\/](react|react-dom|react-router|scheduler)[\\/]/ },
             { name: 'vendor', test: /node_modules/, minShareCount: 1 },
           ],

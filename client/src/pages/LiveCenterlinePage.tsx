@@ -1,16 +1,16 @@
-import { AlertOctagon, AlertTriangle, Gauge, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { MaintenanceBar, SwitchOffDialog, SwitchedOffCard } from '@/components/live/ControlParts'
 import { EventSheet } from '@/components/live/EventSheet'
+import { LineView } from '@/components/live/LineView'
 import { MonitorBanner } from '@/components/live/MonitorBanner'
 import { OpenEvents } from '@/components/live/OpenEvents'
 import { RecentActivity } from '@/components/live/RecentActivity'
 import { ZoneTable } from '@/components/live/ZoneTable'
-import { CardGridSkeleton, TableSkeleton } from '@/components/shared/LoadingSkeleton'
+import { TableSkeleton } from '@/components/shared/LoadingSkeleton'
 import { PageHeader } from '@/components/shared/PageHeader'
-import { SummaryCard } from '@/components/shared/SummaryCard'
+import { Skeleton } from '@/components/ui/skeleton'
 import { useRoles } from '@/hooks/useAuth'
 import { useLiveCenterline } from '@/hooks/useLiveCenterline'
 import { monitoringApi } from '@/services/monitoringApi'
@@ -19,7 +19,8 @@ import { formatManilaFull } from '@/utils/manilaTime'
 
 /**
  * Digital Centerline, live (ADR-0015): every monitored zone's target, HMI setpoint and
- * actual, and the states monitor-core has judged. Nothing is judged in the browser.
+ * actual, and the states monitor-core has judged. Nothing is judged in the browser. The line
+ * view shows the counts and the machine in 3D (ADR-0033); the zone table stays the full record.
  */
 export function LiveCenterlinePage() {
   const { view, error, updatedAt } = useLiveCenterline()
@@ -36,8 +37,6 @@ export function LiveCenterlinePage() {
   // Count down on the server's clock: the skew measured at the last refresh
   const skew = view && updatedAt ? Date.parse(view.serverTime) - updatedAt : 0
   const now = clock + skew
-  const counts = view?.counts
-
   const allZones = view?.parameters.flatMap((p) => p.zones) ?? []
   const targets = view ? { set: allZones.filter((z) => z.target != null).length, zones: allZones.length } : undefined
 
@@ -68,20 +67,12 @@ export function LiveCenterlinePage() {
 
       {!view ? (
         <>
-          <CardGridSkeleton count={4} />
+          <Skeleton className="bg-nav/90 h-[680px] rounded-lg" />
           <TableSkeleton rows={12} />
         </>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-            <SummaryCard label="Zones monitored" value={counts!.zones} supportingText="From the register in effect" icon={Gauge} tone="brand" />
-            <SummaryCard label="HMI mismatches" value={counts!.hmiOpen} supportingText="Setpoint off target past the delay"
-                         icon={SlidersHorizontal} tone={counts!.hmiOpen ? 'warning' : 'neutral'} />
-            <SummaryCard label="Warnings" value={counts!.warning} supportingText="Actual past the Warning limits"
-                         icon={AlertTriangle} tone={counts!.warning ? 'warning' : 'neutral'} />
-            <SummaryCard label="Criticals" value={counts!.critical} supportingText="Actual past the Critical limits"
-                         icon={AlertOctagon} tone={counts!.critical ? 'critical' : 'neutral'} />
-          </div>
+          <LineView view={view} now={now} onOpenEvent={setOpenId} />
 
           <SwitchedOffCard zones={view.control.switchedOff} canSwitch={isManager} onChanged={() => undefined} />
 

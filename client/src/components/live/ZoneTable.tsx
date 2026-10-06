@@ -23,7 +23,7 @@ function Value({ value, unit, accent, className }: { value: string | null | unde
   )
 }
 
-function HmiCell({ z, now, onOpenEvent }: { z: LiveZone; now: number; onOpenEvent: (id: string) => void }) {
+export function HmiCell({ z, now, onOpenEvent }: { z: LiveZone; now: number; onOpenEvent: (id: string) => void }) {
   if (!z.known) return <StateBadge tone="nodata" icon={MinusCircle} label="No data" />
   if (z.hmi === 'NO_TARGET') {
     return (
@@ -52,7 +52,7 @@ function HmiCell({ z, now, onOpenEvent }: { z: LiveZone; now: number; onOpenEven
   return <StateBadge tone="normal" icon={CheckCircle2} label="At target" title={`The HMI setpoint is on target${judgedBy(z.hmiRulesVersion)}`} />
 }
 
-function ActualCell({ z, unit, now, onOpenEvent }: { z: LiveZone; unit: string | null; now: number; onOpenEvent: (id: string) => void }) {
+export function ActualCell({ z, unit, now, onOpenEvent }: { z: LiveZone; unit: string | null; now: number; onOpenEvent: (id: string) => void }) {
   if (!z.known || !z.actualSeverity) return <StateBadge tone="nodata" icon={MinusCircle} label="No data" />
   if ((z.actual === null || z.actual === undefined) && !z.actualEvent) {
     return <StateBadge tone="nodata" icon={MinusCircle} label="No data" title="No valid actual value from the machine" />
@@ -82,7 +82,7 @@ function ActualCell({ z, unit, now, onOpenEvent }: { z: LiveZone; unit: string |
 }
 
 /** Why the zone isn't judged right now (ADR-0017): switched off, under maintenance, or back on and waiting. */
-function ControlCell({ c, z, onOpenEvent }: { c: ZoneControl; z: LiveZone; onOpenEvent: (id: string) => void }) {
+export function ControlCell({ c, z, onOpenEvent }: { c: ZoneControl; z: LiveZone; onOpenEvent: (id: string) => void }) {
   const event = z.actualEvent ?? z.hmiEvent
   const badge =
     c.state === 'off' ? (
