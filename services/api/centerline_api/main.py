@@ -38,6 +38,8 @@ from .config.routing_store import RoutingStore
 from .config.rules_router import router as rules_router
 from .config.rules_store import RulesStore
 from .idempotency import HEADER as IDEMPOTENCY_HEADER, Idempotency
+from .ocap.router import router as ocap_router
+from .ocap.store import OcapStore
 from .config.store import ConnectionsStore
 from .monitoring.control import router as control_router
 from .monitoring.router import router as monitoring_router
@@ -56,6 +58,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.mapping_store = MappingStore()
     app.state.routing_store = RoutingStore()
     app.state.ranges_store = RangesStore()
+    app.state.ocap_store = OcapStore()
     app.state.passwords = Passwords(settings.auth)
     database.start(app)  # loads app.state.register, from the database or, without it, from the file
     connections = ConnectionsStore(settings.config_dir, settings.timebase, app.state.register.namespace)
@@ -126,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(mapping_router)
     app.include_router(routing_router)
     app.include_router(ranges_router)
+    app.include_router(ocap_router)
     app.include_router(notifications_router)
     app.include_router(workflow_router)
     app.include_router(monitoring_router)

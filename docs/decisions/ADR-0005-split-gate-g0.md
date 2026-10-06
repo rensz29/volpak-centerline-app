@@ -1,7 +1,8 @@
 # ADR-0005 — Split gate G0 so Phase 1 isn't blocked by the AI model decision
 
 - **Status:** Accepted. G0b amended by [ADR-0021](ADR-0021-g0b-revised.md) (2026-10-01): it no longer needs
-  the SKU field or controls M1–M5
+  the SKU field or controls M1–M5. G0c amended by [ADR-0031](ADR-0031-ocap-library-deterministic-path.md)
+  (2026-10-06): it gates Phase 3's AI only, and the OCAP library and its search without AI started before it
 - **Date:** 2026-09-28
 - **Decider:** Szyrelle (system owner)
 - **Changes:** SDD §15 roadmap (G0)

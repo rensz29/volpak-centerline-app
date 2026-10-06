@@ -1,14 +1,15 @@
-import { CheckCheck, Loader2 } from 'lucide-react'
+import { CheckCheck, Loader2, Paperclip } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
-import { STATUS_LABEL as REQUEST_LABEL, STATUS_TONE as REQUEST_TONE } from '@/components/workflow/workflowModel'
+import { ENTRY_LABEL, STATUS_LABEL as REQUEST_LABEL, STATUS_TONE as REQUEST_TONE } from '@/components/workflow/workflowModel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetBody, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Textarea } from '@/components/ui/textarea'
 import { useRoles } from '@/hooks/useAuth'
 import { monitoringApi } from '@/services/monitoringApi'
+import { workflowApi } from '@/services/workflowApi'
 import type { EventDetail } from '@/types/monitoringApi'
 import { cn } from '@/utils/cn'
 import { formatManilaFull } from '@/utils/manilaTime'
@@ -177,7 +178,12 @@ export function EventSheet({ id, onClose, onOpen }: { id: string; onClose: () =>
                           </p>
                           {r.entries.map((x, i) => (
                             <p key={i} className="text-ink-soft mt-1 text-[12px]">
-                              <span className="text-ink-muted">{x.kind === 'answer' ? x.question : x.kind} · {x.by}:</span> {x.body || '✓'}
+                              <span className="text-ink-muted">{x.kind === 'answer' ? x.question : ENTRY_LABEL[x.kind]} · {x.by}:</span> {x.body || '✓'}
+                              {x.attachment && (
+                                <a href={workflowApi.attachmentUrl(x.attachment.id)} className="text-brand ml-1 inline-flex items-center gap-0.5 hover:underline">
+                                  <Paperclip className="size-3" aria-hidden /> {x.attachment.name}
+                                </a>
+                              )}
                             </p>
                           ))}
                         </li>

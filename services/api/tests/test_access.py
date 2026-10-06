@@ -102,6 +102,18 @@ EXPECTED = {
     ("POST", "/api/v1/workflow/requests/{request_id}/answers"): OPR,
     ("POST", "/api/v1/workflow/requests/{request_id}/acknowledge"): OPR,
     ("POST", "/api/v1/workflow/requests/{request_id}/guidance"): MGR,
+    ("POST", "/api/v1/workflow/requests/{request_id}/ocap"): OPR,  # the operator chooses the OCAP (ADR-0031)
+    ("GET", "/api/v1/workflow/attachments/{attachment_id}"): EVERY,
+    # The OCAP library (OCP-03, ADR-0031): every role reads it; any Manager uploads, activates and suspends
+    ("GET", "/api/v1/ocaps"): EVERY,
+    ("GET", "/api/v1/ocaps/search"): EVERY,
+    ("GET", "/api/v1/ocaps/versions/{version_id}"): EVERY,
+    ("GET", "/api/v1/ocaps/versions/{version_id}/original"): EVERY,
+    ("GET", "/api/v1/ocaps/sections/{section_id}"): EVERY,
+    ("POST", "/api/v1/ocaps"): MGR,
+    ("POST", "/api/v1/ocaps/{document_id}/versions"): MGR,
+    ("POST", "/api/v1/ocaps/versions/{version_id}/activate"): MGR,
+    ("POST", "/api/v1/ocaps/versions/{version_id}/suspend"): MGR,
     ("GET", "/api/v1/config/workflow"): PRIV,
     ("PUT", "/api/v1/config/workflow"): ADM,
     # accounts and the detailed health

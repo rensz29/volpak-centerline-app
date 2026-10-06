@@ -4,6 +4,9 @@ The URS v1.1 acceptance tests (§13) that the phase gates run, as automated pyte
 - **AT-04, AT-05 and AT-06, for gate G2**
   ([ADR-0028](../../docs/decisions/ADR-0028-polling-idempotency-g2-acceptance.md)). All 19 of their requirements
   passed on 2026-10-06.
+- **AT-08's deterministic part, for gate G3** ([ADR-0031](../../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)): the OCAP library, the
+  top three sections with their exact source, a Manager's guidance and the scanned uploads, with no AI running. Its
+  seven requirements passed on 2026-10-06. G3 also needs AT-08's AI part.
 - **AT-ANA-01…10, for gate G4**, on an independently calculated dataset
   ([ADR-0029](../../docs/decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md),
   [../fixtures/analytics](../fixtures/analytics/README.md)). ANA-01…21 all passed on 2026-10-06.
@@ -49,6 +52,10 @@ Each test names the requirements it shows with `@pytest.mark.urs(...)`.
 | | WF-02 | A finished request isn't asked again in its shift; the next shift's comes at the operator's sign-in |
 | | WF-03 | A request still open after 15 min alerts Management once |
 | | SES-05 | A request closes when its mismatch is resolved or superseded, so the browser drops the unsent text |
+| [AT-08](test_at08_ocap_deterministic.py), deterministic part: top three approved OCAP sections, the exact source, the path without AI | OCP-01, OCP-02, WF-01, AI-01 | monitor-core judges a mismatch; after the reason and answers, up to three Active sections are offered, best first, a Draft never. The operator reads the chosen one exactly as it was read from the file, and the file byte for byte, then acknowledges it. No model runs |
+| | OCP-03 | A Manager uploads PDF and Word versions and activates them with no second approval, keeping the earlier one or retiring it; each step is audited |
+| | GDE-01, WF-01 | None apply: a Manager guides with one file and keeps the guidance as a reusable OCAP, which the next mismatch with those words is offered |
+| | SEC-01 | Every upload is scanned first: an infected OCAP or guidance file is refused and audited, and with no scanner answering nothing is saved |
 | [AT-06](test_at06_notifications.py): Teams Flow bot and SMTP delivery, retry, deduplication, Administrator re-drive | NOT-01…04, NOT-06 | A Warning, then a Critical, reach Teams through the flow's signed trigger and email through the relay, each tried within 10 s |
 | | NOT-03, NOT-06 | A Teams outage doesn't hold up email; a replayed step is still one message; what the relay accepted is never sent again |
 | | NOT-04, NOT-05 | Retries at 30 s, 1, 5, then every 15 min for 24 h; then a permanent failure, re-driven only by an Administrator with a reason |
@@ -74,11 +81,13 @@ Each test names the requirements it shows with `@pytest.mark.urs(...)`.
 - **AT-ANA-06's and AT-ANA-10's look on the page.** The tooltips, zoom, pan and reset of the two tabs, and the
   wording as shown, are checked in a browser; the suite shows the data and the code they come from. Exports (also
   AT-ANA-10) wait for O-04.
-- **AT-05's OCAP branch.** Until the OCAP library exists (Phase 3), every request goes to a Manager's guidance. AT-05
-  is extended and run again then.
+- **AT-08's AI part.** The clarification questions, the summary beside the source, translation and embedding search
+  come with the ai-worker once the model is chosen (O-01). Then AT-08 runs with Ollama up and again with it stopped.
+  The sample OCAPs are generated (`services/api/tests/ocap_samples.py`): the plant's real ones are needed before G3.
+  Scanning uses a stand-in for clamd. The real one is checked by `services/api/tests/test_ocap_units.py` with
+  `CENTERLINE_TEST_CLAMD` set.
 - **The other suites:**
   - AT-01…03: tested in `services/monitor_core/tests` for G1;
-  - AT-07: Phase 5;
-  - AT-08: Phase 3.
+  - AT-07: Phase 5.
 
   They move here as their gates come.

@@ -1,21 +1,24 @@
-import { AlertTriangle, CheckCheck, Loader2, MessageSquareText, Send } from 'lucide-react'
+import { AlertTriangle, BookOpen, CheckCheck, Loader2, Paperclip, Send } from 'lucide-react'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import { SectionText } from '@/components/ocap/SectionText'
+import { sizeLabel } from '@/components/ocap/ocapModel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { ApiProblem } from '@/services/http'
-import { workflowApi } from '@/services/workflowApi'
+import { workflowApi, type GuidanceBody } from '@/services/workflowApi'
 import type { WorkflowRequest } from '@/types/workflowApi'
 import { cn } from '@/utils/cn'
 import { loadDraft, saveDraft } from '@/utils/drafts'
 import { formatManilaFull } from '@/utils/manilaTime'
 
-import { STATUS_LABEL, STATUS_TONE, withUnit } from './workflowModel'
+import { GuidanceForm } from './GuidanceForm'
+import { OcapOffers } from './OcapOffers'
+import { ENTRY_LABEL, STATUS_LABEL, STATUS_TONE, withUnit } from './workflowModel'
 
 const at = (iso: string) => `${formatManilaFull(Date.parse(iso))} Manila`
-const ENTRY_LABEL = { reason: 'Reason', answer: 'Answer', guidance: 'Guidance', acknowledgment: 'Acknowledged' } as const
 
 /** A text box whose unsent text is also kept in this browser, until sent or until the session or request ends. */
 function Draft({ id, texts, setText, label, placeholder, rows = 3 }: {
@@ -32,7 +35,7 @@ function Draft({ id, texts, setText, label, placeholder, rows = 3 }: {
   )
 }
 
-/** One request: the mismatch, everything written on it, and the step it waits for (ADR-0025). */
+/** One request: the mismatch, everything written on it, and the step it waits for (ADR-0025, ADR-0031). */
 export function RequestCard({
   r,
   questions,
@@ -50,7 +53,11 @@ export function RequestCard({
 }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [reading, setReading] = useState<number | null>(null)
   const e = r.event
+  /** What the operator acknowledges: the OCAP section chosen, or the Manager's guidance */
+  const last = r.entries.findLast((x) => x.kind === 'ocap_choice' || x.kind === 'guidance')
+  const ackOcap = last?.kind === 'ocap_choice' && !!last.section
   const answerKeys = questions.map((_, i) => `${r.id}.answer.${i}`)
   const keys = [`${r.id}.reason`, `${r.id}.guidance`, ...answerKeys]
   const [texts, setTexts] = useState<Record<string, string>>(() => Object.fromEntries(keys.map((k) => [k, loadDraft(k)])))
@@ -111,6 +118,22 @@ export function RequestCard({
               </p>
               {x.question && <p className="text-ink-soft text-[12px]">{x.question}</p>}
               {x.body && <p className="text-ink whitespace-pre-wrap">{x.body}</p>}
+              {x.section && (
+                <>
+                  <button type="button" className="text-brand inline-flex items-center gap-1 text-[12px] hover:underline"
+                          onClick={() => setReading(reading === i ? null : i)}>
+                    <BookOpen className="size-3.5" aria-hidden /> {reading === i ? 'Hide the section' : 'Read the section'}
+                  </button>
+                  {reading === i && <SectionText sectionId={x.section.sectionId} section={x.section} />}
+                </>
+              )}
+              {x.attachment && (
+                <a href={workflowApi.attachmentUrl(x.attachment.id)}
+                   className="text-brand inline-flex items-center gap-1 text-[12px] hover:underline">
+                  <Paperclip className="size-3.5" aria-hidden /> {x.attachment.name} · {sizeLabel(x.attachment.size)}
+                  {x.attachment.scan === 'not_scanned' && <span className="text-ink-muted"> · not scanned</span>}
+                </a>
+              )}
             </li>
           ))}
         </ol>
@@ -140,21 +163,31 @@ export function RequestCard({
           </Button>
         </div>
       )}
+      {isOperator && r.next === 'ocap' && (
+        <OcapOffers offers={r.offered} busy={busy}
+                    onChoose={(id) => void run(() => workflowApi.ocap(r.id, id), id ? 'OCAP section chosen' : 'Sent to a Manager', [])} />
+      )}
+      {r.next !== 'ocap' && r.offered.length > 0 && (isManager || r.next === null) && (
+        <p className="text-ink-muted text-[12px]">OCAP offered: {r.offered.map((o) => o.citation).join('; ')}</p>
+      )}
       {isManager && r.next === 'guidance' && (
-        <div className="flex flex-col gap-2">
-          <Draft id={`${r.id}.guidance`} texts={texts} setText={setText} label="Your guidance"
-                 placeholder="What the operator should do (GDE-01)" />
-          <Button type="button" size="sm" className="self-end" disabled={busy}
-                  onClick={() => void run(() => workflowApi.guidance(r.id, text(`${r.id}.guidance`)), 'Guidance sent', [`${r.id}.guidance`])}>
-            {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <MessageSquareText className="size-4" aria-hidden />} Send the guidance
-          </Button>
-        </div>
+        <GuidanceForm
+          busy={busy}
+          text={<Draft id={`${r.id}.guidance`} texts={texts} setText={setText} label="Your guidance"
+                       placeholder="What the operator should do (GDE-01)" />}
+          onSend={(body: (t: string) => Promise<GuidanceBody>) =>
+            void run(async () => workflowApi.guidance(r.id, await body(text(`${r.id}.guidance`))), 'Guidance sent', [`${r.id}.guidance`])}
+        />
       )}
       {isOperator && r.next === 'acknowledgment' && (
         <Button type="button" size="sm" className="self-end" disabled={busy}
                 onClick={() => void run(() => workflowApi.acknowledge(r.id), 'Acknowledged', [])}>
-          {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <CheckCheck className="size-4" aria-hidden />} I've read the guidance
+          {busy ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <CheckCheck className="size-4" aria-hidden />}{' '}
+          {ackOcap ? "I've read the OCAP section" : "I've read the guidance"}
         </Button>
+      )}
+      {isOperator && r.next === 'acknowledgment' && (
+        <p className="text-ink-muted -mt-2 self-end text-[11px]">This records that you reviewed it, not that each step was done.</p>
       )}
       {error && <p className="text-critical text-[12px]">{error}</p>}
     </article>

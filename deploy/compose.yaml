@@ -1,8 +1,8 @@
-# Centerline on one Docker host (SDD §3, ADR-0030): the five containers built so far. The plan's others come
-# with their phases: ai-worker, ollama and clamav (Phase 3), backup-agent (Phase 5).
+# Centerline on one Docker host (SDD §3, ADR-0030): the six containers built so far. The plan's others come
+# with their phases: ai-worker and ollama (Phase 3, after O-01/G0c), backup-agent (Phase 5).
 #
 #   deploy/setup.sh                                      # once: this host's settings in deploy/config
-#   docker compose -f deploy/compose.yaml up -d --build  # then https://localhost:6040
+#   docker compose -f deploy/compose.yaml up -d --build  # then http://localhost:6040 (https:// with CENTERLINE_SCHEME=https)
 #
 # It judges the real machine on the plant broker and reads the real Timebase, as the control-room PC will, on its
 # own database. Everything it writes is permanent. One monitor-core judges the line at a time: stop the development
@@ -45,6 +45,7 @@ services:
               "--no-proxy-headers"]
     environment:
       CENTERLINE_API_CONFIG: /app/config/api.json
+      CENTERLINE_SCHEME: ${CENTERLINE_SCHEME:-http}  # over plain HTTP the session cookie can't be Secure (ADR-0032)
     volumes:
       - ./config:/app/config  # it saves the connections, the register's export and the query log here
     depends_on:
@@ -79,18 +80,28 @@ services:
     depends_on:
       api: {condition: service_healthy}
 
+  clamav:  # scans every uploaded OCAP and guidance file before it's kept (SEC-01, ADR-0031)
+    image: clamav/clamav:stable
+    volumes:
+      - clamav-db:/var/lib/clamav  # its signatures, kept between restarts; freshclam updates them (O-24 offline)
+    restart: unless-stopped
+    networks: [centerline]  # not published: only the api reaches it, as clamav:3310
+    # Its own healthcheck (clamdcheck.sh). The first start downloads the signatures and loads them in a few minutes;
+    # meanwhile uploads are refused with "the malware scanner isn't answering". Nothing waits for it.
+
   proxy:
     image: centerline-web:latest
     build:
       context: ..
       dockerfile: deploy/web.Dockerfile
     environment:
-      CENTERLINE_SITE: ${CENTERLINE_SITE:-localhost}  # the names browsers use (deploy/.env)
-      CENTERLINE_DEFAULT_SNI: ${CENTERLINE_DEFAULT_SNI:-localhost}  # for browsers that open it by IP address
+      CENTERLINE_SCHEME: ${CENTERLINE_SCHEME:-http}  # http (ADR-0032) or https (deploy/.env)
+      CENTERLINE_SITE: ${CENTERLINE_SITE:-localhost}  # HTTPS only: the names browsers use, for the certificate
+      CENTERLINE_DEFAULT_SNI: ${CENTERLINE_DEFAULT_SNI:-localhost}  # HTTPS only: for browsers that open it by IP address
     ports:
-      - "${CENTERLINE_BIND:-127.0.0.1}:${CENTERLINE_PORT:-6040}:443"  # HTTPS; this PC only unless deploy/.env opens it
+      - "${CENTERLINE_BIND:-127.0.0.1}:${CENTERLINE_PORT:-6040}:8080"  # this PC only unless deploy/.env opens it
     volumes:
-      - caddy-data:/data  # its local CA and certificate
+      - caddy-data:/data  # HTTPS: its local CA and certificate
       - caddy-config:/config
     depends_on:
       api: {condition: service_healthy}
@@ -103,6 +114,7 @@ networks:
 volumes:
   pgdata:
   journal:
+  clamav-db:
   caddy-data:
   caddy-config:
 

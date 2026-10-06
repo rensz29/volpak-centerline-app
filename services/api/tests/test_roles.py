@@ -23,7 +23,8 @@ EXPECTED = {
                              "tag_mapping", "event", "event_transition", "lightweight_change", "event_acknowledgment",
                              "notification", "app_user_password", "monitoring_switch", "routing_version", "notification_route",
                              "delivery_attempt", "shift_instance", "workflow_entry", "workflow_settings", "analytics_range_version",
-                             "analytics_range")},
+                             "analytics_range", "ocap_document", "ocap_version", "ocap_section", "ocap_chunk", "ocap_status",
+                             "ocap_recommendation", "workflow_attachment")},
     # also updated: activations (the triggers allow only cancelling) and the operational rows
     **{t: UPDATE for t in ("config_activation", "mapping_activation", "event_state", "scheduled_action", "pause_period",
                            "monitor_heartbeat", "app_user", "maintenance_window", "routing_activation", "notification_delivery",

@@ -23,6 +23,7 @@ import { LiveCenterlinePage } from '@/pages/LiveCenterlinePage'
 import { MaintenancePage } from '@/pages/MaintenancePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { NotificationsPage } from '@/pages/NotificationsPage'
+import { OcapLibraryPage } from '@/pages/OcapLibraryPage'
 import { OpenEventsPage } from '@/pages/OpenEventsPage'
 import { ReasonsPage } from '@/pages/ReasonsPage'
 import { SignInPage } from '@/pages/SignInPage'
@@ -73,6 +74,7 @@ function SignedInApp() {
             <Route path={ROUTES.activeAlarms} element={<OpenEventsPage />} />
             <Route path={ROUTES.alarmHistory} element={<EventHistoryPage />} />
             <Route path={ROUTES.reasons} element={<ReasonsPage />} />
+            <Route path={ROUTES.ocaps} element={<OcapLibraryPage />} />
             <Route path={ROUTES.configuration} element={<Only roles={PRIVILEGED}><ConfigurationSetupPage /></Only>} />
             <Route path={ROUTES.accounts} element={<Only roles={['ADMINISTRATOR']}><AccountsPage /></Only>} />
             <Route path={ROUTES.maintenance} element={<Only roles={PRIVILEGED}><MaintenancePage /></Only>} />

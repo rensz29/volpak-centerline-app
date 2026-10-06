@@ -7,14 +7,20 @@ Timebase**, on a database of its own. **Everything it writes is permanent**, as 
 
 | Container | What it is |
 |---|---|
-| `proxy` | Caddy: HTTPS with its own local CA, the web app, `/api` to the api. On **https://localhost:6040** (this PC only) |
+| `proxy` | Caddy: the web app, and `/api` to the api. On **http://localhost:6040** (this PC only): plain HTTP by default ([ADR-0032](../docs/decisions/ADR-0032-docker-stack-over-http.md)), HTTPS with its own local CA when `deploy/.env` says `CENTERLINE_SCHEME=https` |
 | `api` | The api (FastAPI). It migrates the database at start; it isn't published, only the proxy reaches it |
 | `monitor-core` | Subscribes, read-only, to the broker saved on the Connections tab, and judges every zone. MQTT client ID `centerline-monitor-centerline-docker` |
 | `notifier` | Delivers the outbox by the routing in effect |
 | `postgres` | PostgreSQL 17 with pgvector, in the `centerline_pgdata` volume. Not published |
+| `clamav` | ClamAV's clamd: the api sends it every uploaded OCAP and guidance file before keeping it ([ADR-0031](../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)). Its signatures are in the `centerline_clamav-db` volume, and it updates them itself while it has the internet. Not published |
 
-The plan's other four containers come with their phases: ai-worker, ollama and clamav (Phase 3), backup-agent
-(Phase 5).
+The plan's other three containers come with their phases: ai-worker and ollama (Phase 3, once the AI model is chosen,
+O-01), backup-agent (Phase 5).
+
+**clamav** takes about 1 GB of memory once its signatures are loaded, which takes a minute or two after a start.
+Until it answers, uploads are refused ("the malware scanner isn't answering") and nothing else waits for it.
+`setup.sh` points the api at it (`"scanner"` in `deploy/config/api.json`), and adds that to an api.json made before.
+On the plant network its signatures need another way in (O-24).
 
 ## Start
 
@@ -30,9 +36,12 @@ docker compose -f deploy/compose.yaml up -d --build
 - `setup.sh` copies the register, the plant connections with the secrets they name, and the old history from
   `config/`. It makes a new database password; the api makes the services' role password at its first start. It
   never overwrites a file.
-- **`deploy/.env`** (git-ignored), also written by `setup.sh`: where the proxy listens and under which names.
-  `CENTERLINE_SITE` and `CENTERLINE_DEFAULT_SNI` are the names and address browsers use, `CENTERLINE_BIND` and
-  `CENTERLINE_PORT` the address and port (127.0.0.1:6040 here), and `CENTERLINE_UID` the owner of `deploy/config`.
+- **`deploy/.env`** (git-ignored), also written by `setup.sh`: how and where the proxy listens.
+  - `CENTERLINE_SCHEME`: `http` (the default) or `https`.
+  - `CENTERLINE_SITE` and `CENTERLINE_DEFAULT_SNI`, for HTTPS only: the names and address browsers use, for the
+    certificate.
+  - `CENTERLINE_BIND` and `CENTERLINE_PORT`: the address and port (127.0.0.1:6040 here).
+  - `CENTERLINE_UID`: the owner of `deploy/config`.
   To set it up on another machine, see [the README's deployment guide](../README.md#deploy-on-another-machine).
 
 **One monitor-core judges the line at a time.** Before starting this stack's `monitor-core` and `notifier`, stop the
@@ -49,10 +58,15 @@ docker compose -f deploy/compose.yaml exec api python -m centerline_api.auth cre
 ```
 
 The temporary password is in `deploy/config/secrets/first-admin-password` and works for 24 h. Open
-https://localhost:6040 and sign in. Choose your own password, then delete the file.
+http://localhost:6040 and sign in. Choose your own password, then delete the file.
 
-The browser warns about the certificate the first time: it's signed by the proxy's own CA. Continue, or trust that
-CA on this PC:
+**Over plain HTTP** (the default), passwords and the session cookie cross the network unencrypted: keep it to a
+network you trust, for testing. If the browser still jumps to `https://localhost:6040`, it remembers the HTTPS
+setup (HSTS). Clear it once at `edge://net-internals/#hsts` ("Delete domain security policies": `localhost`), or open
+http://127.0.0.1:6040.
+
+**With `CENTERLINE_SCHEME=https`**, open https://localhost:6040. The browser warns about the certificate the first
+time: it's signed by the proxy's own CA. Continue, or trust that CA on this PC:
 
 ```bash
 docker compose -f deploy/compose.yaml cp proxy:/data/caddy/pki/authorities/local/root.crt deploy/config/centerline-ca.crt
@@ -94,6 +108,8 @@ docker compose -f deploy/compose.yaml up -d --build         # after a code chang
 ```
 
 - **Restarts:** the containers restart by themselves after a crash or when Docker starts. A stopped one stays stopped.
+- **Switching HTTP and HTTPS:** change `CENTERLINE_SCHEME` in `deploy/.env`, then
+  `docker compose -f deploy/compose.yaml up -d proxy api` (the api sets its cookie by it).
 - **Wiping:** `down -v` deletes the database, the journal and the proxy's CA. History is meant to be kept: back
   it up first.
 

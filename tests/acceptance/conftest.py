@@ -1,4 +1,5 @@
-"""The acceptance suites the phase gates run (URS v1.1 §13): AT-04…06 for G2, AT-ANA-01…10 for G4.
+"""The acceptance suites the phase gates run (URS v1.1 §13): AT-04…06 for G2, AT-08's deterministic part for G3,
+AT-ANA-01…10 for G4.
 
 They run with the services' tests (`cd services && .venv/bin/python -m pytest`; pyproject.toml lists this folder),
 or alone (`… -m pytest ../tests/acceptance`), and need the development database as those do.

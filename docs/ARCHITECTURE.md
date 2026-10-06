@@ -47,6 +47,11 @@ Phase 1 UI prototype (`client/`) differs from the target.
 > AT-ANA-01…10 passed on an independently calculated dataset, so **G4 is met** ([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)).
 > The same day the application went into Docker: proxy, api, monitor-core, notifier and postgres, judging the real plant on a database of
 > their own, as a rehearsal for the control-room PC ([ADR-0030](decisions/ADR-0030-docker-stack.md)).
+> **Phase 3 began** the same day without its AI model (O-01 stays open): the **OCAP library**, where Managers upload PDF and Word
+> OCAPs scanned by ClamAV, check the sections they're read into and activate them; a keyword search over the Active versions; the
+> reason workflow's OCAP steps, up to three sections with their exact source; and a Manager's guidance with a file, or kept as a
+> reusable OCAP ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)). The Docker stack then moved to plain HTTP by default, so testers'
+> devices needn't trust a certificate; HTTPS stays one setting away, and go-live's choice is O-25 ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)).
 
 ID conventions used throughout (same as the SDD):
 
@@ -168,12 +173,12 @@ records, so live monitoring and Analytics see the same values.
 |---|---|---|---|
 | **monitor-core** | MQTT subscriber (read-only), snapshot gate, HMI + Actual rules per zone, durable timers, shift clock; writes events + outbox rows; heartbeat every 2 s, carrying the live values ([ADR-0015](decisions/ADR-0015-live-centerline-page.md)) | **stops — it *is* the monitor** | OPC (ADR-0006), HMI, ACT, MON-01, RES-01 |
 | **postgres** (+pgvector) | System of record: config, events, audit, outbox, users, OCAP text + embeddings | continues — monitor-core journals to disk for 30 min | DAT-01, RES-01 |
-| **api** | REST (polled; no WebSocket for one line, ADR-0028), login/sessions, workflow, config, OCAP admin, exports, Analytics | continues | IAM, SES, WF, EXP, ANA |
-| **proxy** (Caddy) | TLS, serves the web UI, overwrites client-IP header | continues | SEC-01, SES-04 |
+| **api** | REST (polled; no WebSocket for one line, ADR-0028), login/sessions, workflow, config, the OCAP library (reading the files and the keyword search too, until the ai-worker exists: [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)), exports, Analytics | continues | IAM, SES, WF, OCP, EXP, ANA |
+| **proxy** (Caddy) | TLS, serves the web UI, overwrites client-IP header. Built: plain HTTP by default, HTTPS with Caddy's own CA by one setting ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)) | continues | SEC-01, SES-04 |
 | **notifier** | Outbox workers, one lane per channel; watches monitor-core heartbeat | continues | NOT-01…07 |
 | **ai-worker** | OCAP parsing, embedding, retrieval, clarification, summary, translation | continues (deterministic fallback) | AI, OCP, LAN-01 |
 | **ollama** | Pinned language + embedding models | continues | AI-01 |
-| **clamav** | Scans every upload before storage | continues; uploads wait | SEC-01 |
+| **clamav** (built, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) | Scans every upload before storage (clamd's INSTREAM) | continues; uploads are refused until it answers | SEC-01 |
 | **backup-agent** | pgBackRest hourly incr. + daily full + WAL; OCAP files; off-host copy | continues | BKP-01 |
 
 **DD-01** Acquisition and rules share one process — single writer per parameter, no race on
@@ -205,7 +210,9 @@ volpak-digital-centerline/
 ├─ client/                     React + TS UI (existing prototype, evolves in place)
 │  ├─ src/services/            mockApi.ts → apiClient.ts (the single seam, keep it)
 │  ├─ src/components/live/     (built, ADR-0015) the live Digital Centerline page: zone table, open events, event sheet
-│  └─ src/pages/ReasonsPage.tsx  (built, ADR-0025) the Reasons page, with components/workflow/; the shift warning is in components/auth/
+│  ├─ src/pages/ReasonsPage.tsx  (built, ADR-0025) the Reasons page, with components/workflow/ (the OCAP step and the
+│  │                           guidance form too, ADR-0031); the shift warning is in components/auth/
+│  └─ src/pages/OcapLibraryPage.tsx  (built, ADR-0031) the OCAP library: search, upload, versions, with components/ocap/
 ├─ services/
 │  ├─ common/centerline_common/  (built) Timebase client (historian.py), register loader,
 │  │                           db.py (connections, UUIDv7), migrate.py, rules.py (layer
@@ -221,7 +228,7 @@ volpak-digital-centerline/
 │  │  │                        reason requests with their events, escalations, ended shifts (ADR-0025)
 │  │  ├─ mqtt.py, service.py   read-only subscriber; the service loop, heartbeat, reloads
 │  │  └─ journal.py            the disk journal during a database outage, replayed in order (RES-01, ADR-0018)
-│  ├─ api/centerline_api/      (built: Analytics, Configuration, Monitoring, Accounts, Notifications, Reasons) FastAPI app: routers per area (§11), ws hub
+│  ├─ api/centerline_api/      (built: Analytics, Configuration, Monitoring, Accounts, Notifications, Reasons, OCAP) FastAPI app: routers per area (§11)
 │  │  ├─ auth/                 accounts, sign-in, sessions, roles, the breached-password list (ADR-0016)
 │  │  ├─ database.py           start-up (migrate, seed), a connection per request, runs without the DB
 │  │  ├─ config/               connections, register, mappings and rules (ADR-0011…0013): stores, audit,
@@ -229,19 +236,23 @@ volpak-digital-centerline/
 │  │  ├─ monitoring/           the live state from the heartbeat, events, brief changes (ADR-0015); acknowledging;
 │  │                           control.py: zones switched off and maintenance windows (ADR-0017)
 │  │  ├─ notifications/        the Notifications log, TEST messages, re-drives (ADR-0023); routing is in config/
-│  │  └─ workflow/             the reason workflow: requests, their steps, the follow-up questions (ADR-0025)
+│  │  ├─ ocap/                 the OCAP library (ADR-0031): scan.py (clamd), parse.py (PDF and Word into sections with
+│  │  │                        their pages), store.py (versions, statuses, the keyword search), router.py
+│  │  └─ workflow/             the reason workflow: requests, their steps with the OCAP choice, the follow-up questions,
+│  │                           the guidance's file and reusable OCAP (ADR-0025, ADR-0031)
 │  ├─ notifier/centerline_notifier/   (built, ADR-0023) routing, one lane per channel, retries and leases, the
 │  │                           monitor-core watcher, its heartbeat; channels.py, routing.py, messages.py and outbox.py
 │  │                           are in common/ (the api uses them for TEST messages and re-drives)
-│  ├─ ai_worker/               ingest/, retrieve/, generate/, verify/, fallback/
+│  ├─ ai_worker/               ingest/, retrieve/, generate/, verify/, fallback/ (not yet: the api reads the files and
+│  │                           searches by keyword until then, ADR-0031)
 │  └─ backup_agent/            pgBackRest config + file copy jobs
 ├─ db/
-│  ├─ migrations/              (built: 0001 configuration … 0006 the services' role, 0007 placeholder SKU, 0008 notifications, 0009 the reason workflow, 0010 TRUNCATE guards, 0011 no SKU) plain SQL in order, recorded with hashes
+│  ├─ migrations/              (built: 0001 configuration … 0006 the services' role, 0007 placeholder SKU, 0008 notifications, 0009 the reason workflow, 0010 TRUNCATE guards, 0011 no SKU, 0012 idempotency keys, 0013 Analytics ranges, 0014 the OCAP library) plain SQL in order, recorded with hashes
 │  └─ seed/                    rules-proposal.json (ADR-0012), routing-proposal.json (ADR-0023); later line, parameters, zones, units
 ├─ deploy/
 │  ├─ dev/compose.yaml         (built) development PostgreSQL 17 + pgvector on 127.0.0.1:55432
-│  ├─ compose.yaml             (built: 5 of the 9, [ADR-0030](decisions/ADR-0030-docker-stack.md)) health checks, restart policies; services.Dockerfile, web.Dockerfile
-│  ├─ caddy/                   (built) Caddyfile; its internal CA lives in a volume, never committed
+│  ├─ compose.yaml             (built: 6 of the 9, [ADR-0030](decisions/ADR-0030-docker-stack.md); clamav, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) health checks, restart policies; services.Dockerfile, web.Dockerfile
+│  ├─ caddy/                   (built) http.Caddyfile (the default, ADR-0032) and https.Caddyfile, sharing app.caddy; the internal CA lives in a volume, never committed
 │  ├─ config/                  (git-ignored) this host's settings and secrets, seeded by setup.sh
 │  └─ offline-kit/             scripts to export images (by digest) + models
 ├─ config/                     files next to the database (ADR-0011, ADR-0012)
@@ -257,7 +268,7 @@ volpak-digital-centerline/
 │  ├─ mqtt-sim/                simulated Volpak publisher for dev and G1 (local broker only)
 │  └─ notify-sink/             a local Teams flow and SMTP relay that keep what they receive (ADR-0023)
 ├─ tests/
-│  ├─ acceptance/              (built: AT-04…06, ADR-0028; AT-ANA-01…10, ADR-0029) AT-01 … AT-08, AT-ANA-01 … AT-ANA-10
+│  ├─ acceptance/              (built: AT-04…06, ADR-0028; AT-ANA-01…10, ADR-0029; AT-08's deterministic part, ADR-0031) AT-01 … AT-08, AT-ANA-01 … AT-ANA-10
 │  └─ fixtures/                (built, ADR-0029) analytics reference dataset + independent results
 └─ docs/
    ├─ ARCHITECTURE.md          this file
@@ -467,16 +478,19 @@ dropped: the provisional degraded mode until O-12 decides the rest.
 
 ### 7.1 Workflow (WF-01…03, SES-05)
 
-> **Built so far** ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)): step 1, step 2, step 3 with fixed questions only, and step 6
-> without the attachment.
+> **Built so far** ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md), [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)): every step, without the AI: step 3 with fixed
+> questions only, and step 5 without the summary.
 > - The questions are two, and an Administrator edits them.
-> - With no OCAP library yet, every request goes to a Manager's guidance, and the operator
->   acknowledges it.
+> - After the answers, up to three sections of the Active OCAPs are offered, found by keyword search (§7.2). With no match, or
+>   "None of these apply", the request goes to a Manager's guidance.
+> - A chosen section is shown in full under its citation (code, version, heading, pages), with its file; the operator
+>   acknowledges it, which records review only.
+> - A Manager's guidance can carry one PDF or Word file, scanned like an OCAP, and can be kept as a reusable OCAP, active at once.
 > - The escalation and the drafts are as below. Polling replaces the WebSocket's purge ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)): every 2 s for
 >   an operator, and a closed request's status drops its draft.
 > - At the shift's end an unfinished request closes as not answered, and the next shift's operator
 >   gets a new one (O-11).
-> - OCAP (steps 4–5) and the AI come in Phase 3.
+> - The AI (clarification questions, summaries, translation) waits for its model (O-01).
 
 1. **Request** — created with the event, or at session activation for mismatches still
    active from the previous shift. `UNIQUE (event_id, shift_instance_id)` blocks repeats.
@@ -498,10 +512,22 @@ dropped: the provisional degraded mode until O-12 decides the rest.
 
 ### 7.2 Retrieval pipeline (ai-worker)
 
+> **Built so far, without the AI** ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)):
+> - **Ingest** runs in the api: ClamAV (clamd), then pdfplumber or python-docx into sections with their pages, and chunks.
+>   PDF headings are found by their size, weight or numbering, and each page's repeated headers and footers are dropped.
+>   Word headings come from their styles; Word's pages are the breaks it recorded, so they're approximate.
+> - **Index and Query** are PostgreSQL full-text search, the deterministic fallback below, and the only path until O-01
+>   closes. English OCAPs use the `english` configuration. Filipino ones use `simple`, with Filipino function words
+>   dropped. Headings and titles weigh more than the body.
+> - **Versions:** a version is searched once a Manager activates it, with no second approval (OCP-03). It moves from
+>   Draft to Active, then to Suspended or Superseded.
+> - **Record:** the sections offered are kept with the request (`ocap_recommendation`, method `keyword`).
+> - **Generate and Verify** come with the ai-worker.
+
 | Stage | Design | URS |
 |---|---|---|
 | Ingest | Upload → ClamAV → text extraction keeping headings + page numbers (pdfplumber, python-docx) → sections → chunks | OCP-03, SEC-01 |
-| Index | Embed chunks with the pinned embedding model into pgvector, tagged with OCAP version. Only **Approved + Active** versions are searchable; suspending removes it in the same transaction | OCP-01 |
+| Index | Embed chunks with the pinned embedding model into pgvector, tagged with OCAP version. Only **Active** versions (activated by a Manager, OCP-03) are searchable; suspending removes it in the same transaction | OCP-01 |
 | Query | Event context (parameter, zone, direction, severity) + reason translated to English; merge vector + full-text results, group by section, keep top 3 | OCP-01, LAN-01 |
 | Generate | Prompt holds **only** retrieved section text; model returns JSON `{summary, section_ids}` | AI-02 |
 | Verify | Reject any citation outside the retrieved set → show source section **with no summary** | OCP-02 |
@@ -673,8 +699,8 @@ PostgreSQL 17+ with pgvector. All timestamps `timestamptz` in UTC.
 | Reference | `line`, `parameter`, `parameter_zone` | Seeded from the register: P01–P11 with units, zones with their tags and status |
 | Configuration | `config_version`, `parameter_rule` (per parameter, optional zone override), `tag_mapping_version`, `tag_mapping` (tag → topic + field), `analytics_range_version`, `analytics_range`, `routing_rule` | Versioned with content hash; immediate or scheduled activation; rollback reactivates an earlier version; `version` column for optimistic locking. **Built** ([ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md), [ADR-0013](decisions/ADR-0013-tag-mappings.md)): `config_version`, `parameter_rule` (a zone or every zone of the parameter; `sku_parameter_rule` until [ADR-0027](decisions/ADR-0027-no-sku.md)), `config_activation`, `mapping_version`, `tag_mapping`, `mapping_activation`, `register_version`, the Analytics-valid ranges `analytics_range_version`, `analytics_range` and `analytics_range_activation` ([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)), and the hash-chained `audit_log`, append-only by trigger. What was saved about SKUs before ADR-0027 stays in `legacy_*` columns that new rows can't fill |
 | Monitoring | `event`, `event_transition`, `event_state`, `lightweight_change`, `scheduled_action`, `pause_period` | UUIDv7 IDs from monitor-core; `lightweight_change` partitioned by month; `event_state` is a projection rebuildable from transitions. **Built** (migration 0003, [ADR-0014](decisions/ADR-0014-monitor-core.md)) with `notification` (the outbox), `event_acknowledgment` and `monitor_heartbeat`; partitioning comes when volumes need it |
-| Workflow | `shift_instance`, `workflow_request`, `operator_input`, `clarification`, `ocap_recommendation`, `acknowledgment`, `manager_guidance` | `UNIQUE (event_id, shift_instance_id)`. **Built** (migration 0009, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)): `shift_instance`, `workflow_request`, `workflow_entry` (the reason, answers, guidance and acknowledgment in one append-only table, in place of `operator_input`, `clarification`, `manager_guidance` and `acknowledgment`), `workflow_settings` (the follow-up questions, append-only); `ocap_recommendation` comes with OCAP |
-| OCAP | `ocap_document`, `ocap_version`, `ocap_section`, `ocap_chunk` | Status Draft / Active / Suspended / Superseded; chunk holds the embedding |
+| Workflow | `shift_instance`, `workflow_request`, `operator_input`, `clarification`, `ocap_recommendation`, `acknowledgment`, `manager_guidance` | `UNIQUE (event_id, shift_instance_id)`. **Built** (migration 0009, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)): `shift_instance`, `workflow_request`, `workflow_entry` (the reason, answers, guidance and acknowledgment in one append-only table, in place of `operator_input`, `clarification`, `manager_guidance` and `acknowledgment`), `workflow_settings` (the follow-up questions, append-only). Migration 0014 ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) adds `ocap_recommendation` (the sections offered, with their score and method), the OCAP choice as a `workflow_entry`, and `workflow_attachment` (the guidance's file, scanned) |
+| OCAP | `ocap_document`, `ocap_version`, `ocap_section`, `ocap_chunk` | Status Draft / Active / Suspended / Superseded; chunk holds the embedding. **Built** (migration 0014, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)): each file byte for byte with its SHA-256 and scan verdict; sections with their headings and pages; chunks with a full-text `tsvector` (the embedding comes with the ai-worker); statuses in the append-only `ocap_status`, a row per change, read through `ocap_version_status`. Every table is append-only |
 | Notification | `notification`, `notification_delivery`, `delivery_attempt` | `dedup_key` unique. **Built** ([ADR-0023](decisions/ADR-0023-notifier.md)): also `notification_route` (the frozen routing), `routing_version`/`routing_activation`, `notifier_heartbeat`; a finished delivery can't change (NOT-06) |
 | Identity | `user_account`, `role`, `user_role`, `session`, `auth_event`, `password_history` | Argon2id hashes only. **Built** (migration 0004, [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) as `app_user` (roles as an array; Operator alone), `app_user_login` (each sign-in name unique across kinds), `app_session` (token stored as SHA-256), `app_user_password`; sign-in events go to the hash-chained `audit_log` |
 | Governance | `audit_log`, `retention_policy`, `legal_hold`, `maintenance_window`, `backup_run` | `audit_log` **hash-chained**. **Built so far:** `audit_log` (0001); `maintenance_window` and the append-only `monitoring_switch` (0005, [ADR-0017](decisions/ADR-0017-monitoring-control.md)) |
@@ -748,9 +774,9 @@ One REST API under `/api/v1`. The SDD's WebSocket at `/api/v1/ws` isn't built: o
 | Live | `GET /ws` — popups, event changes, handover warnings, draft purge, session revocation. Not yet: the Digital Centerline page polls every 2 s ([ADR-0015](decisions/ADR-0015-live-centerline-page.md)), and the reason requests every 2 s for an operator, 5 s for others ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) | All |
 | Monitoring (built, [ADR-0015](decisions/ADR-0015-live-centerline-page.md)) | `GET /monitoring/live` (monitor-core's heartbeat with every zone's values and states, and the open events), `GET /monitoring/brief-changes` | All once login exists. No login yet: 127.0.0.1 only |
 | Events | `GET /events` (filters, cursor paging, [ADR-0019](decisions/ADR-0019-alarm-pages-live.md)), `GET /events/counts`, `GET /events/export.csv` (Manager, Administrator: EXP-01), `GET /events/{id}` (built, [ADR-0015](decisions/ADR-0015-live-centerline-page.md): transitions, notifications, the pinned rule and versions, and its reason requests, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)); `POST /events/{id}/acknowledge` (built, [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md): once per Critical period) | Every role reads; a Manager acknowledges |
-| Workflow (built, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) | `GET /workflow/requests` (an operator: the shift's; others: the open ones and the last day's), `GET /workflow/requests/{id}`; `POST /workflow/requests/{id}/reason`, `/answers`, `/acknowledge`; `/ocap-choice` comes with OCAP; the follow-up questions: `GET`/`PUT /config/workflow` | Every role reads; the shift's operator writes; questions: Manager and Administrator read, Administrator changes |
-| Guidance (built, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) | `POST /workflow/requests/{id}/guidance` | Manager |
-| OCAP | `POST /ocaps`, `POST /ocaps/{id}/versions`, `/activate`, `/suspend`; `GET /ocaps/search` | Manager; search all |
+| Workflow (built, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) | `GET /workflow/requests` (an operator: the shift's; others: the open ones and the last day's), `GET /workflow/requests/{id}`; `POST /workflow/requests/{id}/reason`, `/answers`, `/ocap` (one of the sections offered, or none: [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)), `/acknowledge`; `GET /workflow/attachments/{id}`; the follow-up questions: `GET`/`PUT /config/workflow` | Every role reads; the shift's operator writes; questions: Manager and Administrator read, Administrator changes |
+| Guidance (built, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) | `POST /workflow/requests/{id}/guidance`: the text, one PDF or Word file, and optionally a reusable OCAP (ADR-0031) | Manager |
+| OCAP (built, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) | `GET /ocaps`, `GET /ocaps/search`, `GET /ocaps/versions/{id}`, `…/original`, `GET /ocaps/sections/{id}`; `POST /ocaps`, `POST /ocaps/{id}/versions`, `POST /ocaps/versions/{id}/activate`, `…/suspend` | Every role reads and searches; a Manager uploads, activates and suspends |
 | Rules (built, [ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md)) | `GET /config/rules`, `GET /config/rules/proposal`; `GET`/`POST /config/versions`, `POST /config/versions/check`, `POST /config/versions/{n}/activate`, `POST /config/activations/{id}/cancel` | Read: Manager, Administrator. Change: Manager ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) |
 | Mappings (built, [ADR-0013](decisions/ADR-0013-tag-mappings.md)) | `GET /config/mappings`; `GET`/`POST /config/mappings/versions`, `POST /config/mappings/versions/check`, `POST /config/mappings/versions/{n}/activate` (an older one is a rollback), `GET /config/mappings/versions/{n}/export.csv`; `POST /config/mappings/activations/{id}/cancel`; `POST /config/mappings/import`, `POST /config/mappings/discover` | Read: Manager, Administrator. Change, import included: Administrator ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) |
 | Monitoring control (built, [ADR-0017](decisions/ADR-0017-monitoring-control.md)) | `GET /monitoring/control`; `POST /monitoring/switch` (a zone or a parameter's zones, off with a reason, or on); `GET`/`POST /maintenance`, `POST /maintenance/{id}/extend`, `/end` | Every role reads; switching: Manager; maintenance: Administrator |
@@ -816,7 +842,7 @@ payload; the client treats WS as a hint and refetches via REST on reconnect.
 | Shift boundary | Warning 5 min before 06:00/14:00/22:00; at the boundary the session ends, unsent text is cleared and the next shift's operator signs in ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md); O-11 closed) | n/a | SES-03 |
 
 - The proxy **overwrites** the client-IP header; api trusts it **only from the proxy**.
-- Cookies: `HttpOnly; Secure; SameSite=Strict`.
+- Cookies: `HttpOnly; Secure; SameSite=Strict`. Over the Docker stack's plain HTTP, not `Secure` ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)).
 
 ### Role capabilities
 
@@ -825,8 +851,8 @@ account has only that role, because its session rules differ.
 
 | Capability | Role |
 |---|---|
-| Reason, clarification, OCAP acknowledgment | Operator |
-| Critical acknowledgment; brief-change mode; OCAP upload/activation; event guidance | Manager |
+| Reason, clarification, OCAP choice and acknowledgment | Operator |
+| Critical acknowledgment; brief-change mode; OCAP upload, activation and suspension; event guidance with its file or reusable OCAP | Manager |
 | Exports | Manager, Administrator |
 | Accounts, temp passwords, legal hold, maintenance, re-drive, TEST messages, Analytics ranges | Administrator |
 | Rules tab: targets, limits, delays | Manager |
@@ -848,7 +874,8 @@ account has only that role, because its session rules differ.
 
 ### Platform
 
-- HTTPS on the LAN via internal-CA certificate (Caddy).
+- HTTPS on the LAN via internal-CA certificate (Caddy). The Docker stack serves plain HTTP for testing until the owner
+  decides go-live's scheme (O-25, [ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)).
 - Secrets for DB, Timebase, Power Automate, SMTP mounted as files readable only by the
   service that needs them; never in images or logs. Until then the Configuration page writes
   the broker and historian secrets to `config/secrets/` (0600) and never returns them
@@ -879,6 +906,7 @@ redundancy. A single 4 h restore consumes a month's budget → keep a **pre-stag
 | PostgreSQL down | Journal to protected disk (30 min default) | Ordered, idempotent replay | RES-01 |
 | Disk 80 % / 90 % | Warn at 80 %; eligible cleanup at 90 %; protected degraded mode if unresolved | Admin frees space | RES-02 |
 | Ollama down/slow | Template questions, keyword search, no summary | Automatic | AI-01, AT-08 |
+| ClamAV down | Uploads are refused ("the malware scanner isn't answering"); nothing else waits for it | Automatic once it answers | SEC-01 |
 | WAN / Teams down | Retry 24 h → Permanent failure | Admin re-drive | NOT-04/05 |
 | Windows restart | Services start without login; timers restart from zero; no duplicate initial notifications | Automatic | DEP-05, MNT-02 |
 | Hardware failure | Monitoring stops | Restore to spare PC from off-host backup within 4 h | BKP-02 |
@@ -979,7 +1007,7 @@ model and strip, the design tokens and accessibility work (status never by colou
 
 | Phase | Build | Gate to exit |
 |---|---|---|
-| **0 · Foundations & spikes** | Host runtime on the target PC ([deploy/host-check](../deploy/host-check/README.md)); MQTT probe + publish-rejection test ([tools/mqtt-probe](../tools/mqtt-probe/README.md)); Timebase probe + delay analysis ([tools/timebase-analysis](../tools/timebase-analysis/README.md)); Ollama benchmark (EN + FIL) | **G0a / G0b / G0c** per [ADR-0005](decisions/ADR-0005-split-gate-g0.md): G0a starts Phase 1 on the simulator, G0b connects to the real broker, G0c starts Phase 3 |
+| **0 · Foundations & spikes** | Host runtime on the target PC ([deploy/host-check](../deploy/host-check/README.md)); MQTT probe + publish-rejection test ([tools/mqtt-probe](../tools/mqtt-probe/README.md)); Timebase probe + delay analysis ([tools/timebase-analysis](../tools/timebase-analysis/README.md)); Ollama benchmark (EN + FIL) | **G0a / G0b / G0c** per [ADR-0005](decisions/ADR-0005-split-gate-g0.md): G0a starts Phase 1 on the simulator, G0b connects to the real broker, G0c starts Phase 3's AI ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) |
 | **1 · Monitoring core** | Acquisition, snapshot gate, HMI + Actual rules, events, audit, local accounts, disk journal | **G1** — AT-01…03 pass against the simulated MQTT publisher ([tools/mqtt-sim](../tools/mqtt-sim/README.md)) |
 | **2 · Workflow & notifications** | Shift sessions + handover, reason workflow, outbox, Teams flow, SMTP relay | **G2** — AT-04…06 pass |
 | **3 · OCAP & on-prem AI** | Upload + indexing, retrieval, clarification, summaries, bilingual UI, fallback | **G3** — AT-08 passes, **including with Ollama stopped** |
@@ -1012,9 +1040,24 @@ handover and the reason workflow followed ([ADR-0025](decisions/ADR-0025-shifts-
 two fixed follow-up questions, a Manager's guidance and the operator's acknowledgment, the 15-min escalation, and
 the operator's session ending with its shift. Then, on 2026-10-06 ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)): polling kept instead of the WebSocket
 (O-22), the `Idempotency-Key` and `Z` timestamps built (O-23), and the acceptance suites AT-04…06 in
-`tests/acceptance/`, **all passing** (19 requirements). AT-05 runs on the Manager-guidance path until OCAP exists
-(Phase 3). Still to come for G2's sign-off: AT-06 against the real Teams flow and SMTP relay (O-05), and AT-04's
+`tests/acceptance/`, **all passing** (19 requirements). AT-05 runs on the Manager-guidance path; the OCAP branch is
+AT-08's ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)). Still to come for G2's sign-off: AT-06 against the real Teams flow and SMTP relay (O-05), and AT-04's
 cookie and workstation-IP checks behind the HTTPS proxy.
+
+**Phase 3 started on 2026-10-06 without its AI** ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md); G0c now gates the AI only). Built:
+- the OCAP library, with ClamAV scanning every upload;
+- the sections read from PDF and Word files, with their pages;
+- versions activated by a Manager;
+- keyword search over the Active versions;
+- the workflow's OCAP steps;
+- a Manager's guidance with one file, or kept as a reusable OCAP.
+
+AT-08's deterministic part passes in `tests/acceptance/` (OCP-01…03, GDE-01, SEC-01, AI-01, and WF-01's OCAP branch), on
+generated OCAPs. **G3 still needs:**
+- the AI (O-01): grounded bilingual summaries, translation and embedding search;
+- AT-08 with Ollama running, and again with it stopped;
+- the Filipino interface (LAN-01);
+- the plant's real OCAPs.
 
 **Phase 0 is under way** (started 2026-09-29): tasks, evidence, gate status and the requests
 to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tracked in
@@ -1067,7 +1110,7 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 
 | ID | Decision | Priority | Blocks |
 |---|---|---|---|
-| O-01 | Ollama language + embedding models, hardware, licensing | **Critical** | Phase 3 (G0c, [ADR-0005](decisions/ADR-0005-split-gate-g0.md)) |
+| O-01 | Ollama language + embedding models, hardware, licensing | **Critical** | Phase 3's AI (G0c, [ADR-0005](decisions/ADR-0005-split-gate-g0.md)); the rest of Phase 3 started without it ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) |
 | O-02 | Windows + Docker runtime; acquisition security controls | **Critical** | Decided: [ADR-0003](decisions/ADR-0003-host-runtime.md), [ADR-0006](decisions/ADR-0006-mqtt-acquisition.md) M1–M7 (ADR-0004 superseded). M1–M5 accepted as they are for now ([ADR-0021](decisions/ADR-0021-g0b-revised.md)); the host test and M7 pending (G0b) |
 | O-03 | Timebase URL, auth, tag IDs, quality schema, pagination, server-side aggregation | High | **Mostly closed** by the probe: URL, dataset, time parameters, tag names, no aggregation, quality 192, server quirks. Open: token policy (M7), HTTP 500 spans reported to the admin |
 | O-04 | Analytics persistence and export formats | High | Phase 4 |
@@ -1090,6 +1133,8 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 | O-21 | If an area goes silent during long stops (Timebase showed Dosing silent for up to 34 min), the line-wide snapshot gate pauses HMI mismatch monitoring too, which ADR-0010 wants to keep running. Capture a long stop on the broker, then decide: accept it, or gate per area | Medium | HMI monitoring during long stops ([ADR-0006](decisions/ADR-0006-mqtt-acquisition.md)) |
 | O-22 | Live updates: the WebSocket at `/api/v1/ws` with `LISTEN/NOTIFY` (§5, §11), or the polling built so far | High | **Closed** 2026-10-06: polling on one line; the WebSocket only with a second line or a measured need ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)) |
 | O-23 | `Idempotency-Key` on creating POSTs and timestamps ending in `Z` (§11) | Medium | **Closed** 2026-10-06: both built ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)) |
+| O-24 | ClamAV's signatures on the plant network without the internet: a local mirror, an offline update kit, or a route to the signature servers that IT allows | Medium | Upload scanning at the plant (SEC-01, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)). Where it has the internet, the clamav container updates itself |
+| O-25 | HTTP or HTTPS on the control-room PC: the SDD wants HTTPS on the LAN; the Docker stack serves plain HTTP for testing ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)). HTTPS needs a certificate the workstations trust (Caddy's CA installed on each, or one from IT) | High | Go-live (G5): passwords and session cookies cross the LAN unencrypted over HTTP |
 
 Until an O-item closes, implement the affected value as **configuration with a clearly
 marked placeholder default**, never as a hard-coded constant.
@@ -1118,16 +1163,16 @@ marked placeholder default**, never as a hard-coded constant.
 | ACT-01…04 | monitor-core, notifier | 6, 8 | AT-03 |
 | MON-01, MNT-01/02 | monitor-core, api | 6, 13 | *none dedicated* |
 | WF-01…03 | api, monitor-core | 7 | AT-05 |
-| AI-01/02, OCP-01…03, GDE-01, LAN-01 | ai-worker, ollama, api | 7 | AT-08 (OCP-03, GDE-01 not covered) |
+| AI-01/02, OCP-01…03, GDE-01, LAN-01 | ai-worker, ollama, api | 7 | AT-08. Its deterministic part is built ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) and covers OCP-03 and GDE-01, which the URS's AT-08 doesn't; the AI part comes with the ai-worker |
 | NOT-01…07 | notifier | 8 | AT-06 |
 | DAT-01, RET-01/02, EXP-01 | postgres, api | 10 | *none dedicated* |
 | BKP-01/02, AVL-01, RES-01/02 | backup-agent, monitor-core | 13 | AT-07 (restore drill not covered) |
 | CLI-01, PER-01, CAP-01 | all | 5, 13 | *none dedicated* |
 | ANA-01…21 | api, front end | 9 | AT-ANA-01…10 |
-| SEC-01/02 | all | 12 | *none dedicated* |
+| SEC-01/02 | all | 12 | *none dedicated*; upload scanning in AT-08 (ADR-0031) |
 
 **Tests to add to URS §13:** monitoring disable + maintenance windows; OCAP activation
-without second approval + Manager guidance; immutability, retention, legal hold; exports;
+without second approval + Manager guidance (in this repository's AT-08, ADR-0031); immutability, retention, legal hold; exports;
 timed restore drill; performance/capacity run vs PER-01 and CAP-01; security checks for
 lockout, session revocation, workstation IP limits, rejected MQTT publishes (M4).
 

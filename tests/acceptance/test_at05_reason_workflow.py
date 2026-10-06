@@ -1,8 +1,9 @@
 """AT-05: one reason workflow per shift, two clarification maximum and 15-minute escalation.
 
 URS v1.1 §8 (WF-01…03) and SES-05, as built in ADR-0025. monitor-core judges each mismatch on the simulated line;
-the operator and the Manager answer through the api. Until the OCAP library exists (Phase 3), every request goes to
-a Manager's guidance, which the operator acknowledges: WF-01's "OCAP-or-guidance" on its guidance branch.
+the operator and the Manager answer through the api. With no Active OCAP, as here, every request goes to a Manager's
+guidance, which the operator acknowledges: WF-01's "OCAP-or-guidance" on its guidance branch. Its OCAP branch, the
+sections offered and chosen (ADR-0031), is AT-08's.
 """
 
 from __future__ import annotations

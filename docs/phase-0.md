@@ -17,7 +17,7 @@ and out of git.
 | 0.6 | MQTT probe on the plant broker (O-14) | Developer + UNS team | ✅ Two runs on 2026-09-30: an hour running, and 30 min with short stops (longest about 4 min). Port 1883 without TLS, shared account (M1, M2 not met; accepted for now, [ADR-0021](decisions/ADR-0021-g0b-revised.md)) | `tools/mqtt-probe/data/running-2026-09-30/`, `…/stopped-2026-09-30/`, [ADR-0006](decisions/ADR-0006-mqtt-acquisition.md) | Capture a long stop (10 min or more), e.g. at a break or changeover (O-21). The real application's mapping has all 30 tags |
 | 0.7 | Publish-rejection test (control M4) | Developer + UNS admin | ⏸ Deferred: the broker's security is accepted as it is for now ([ADR-0021](decisions/ADR-0021-g0b-revised.md)) | [mqtt-probe README §3](../tools/mqtt-probe/README.md) | When the UNS team gives Centerline its own account |
 | 0.8 | Host runtime on the control-room PC (O-02) | IT + owner | ⏳ Not run | [deploy/host-check](../deploy/host-check/README.md) | Run `Test-CenterlineHost.ps1`, then the boot test |
-| 0.9 | AI model benchmark (O-01) | Developer | ⏸ Deferred by the owner | — | When resumed: sample OCAPs (English and Filipino), bge-m3 plus 2–3 small models |
+| 0.9 | AI model benchmark (O-01) | Developer | ⏸ Deferred by the owner | — | When resumed: the plant's sample OCAPs (English and Filipino, PDF and Word; also needed for the library's parser, ADR-0031), bge-m3 plus 2–3 small models |
 | 0.10 | Plant clocks (O-18) | OT/IT | ⏳ Open | probe report: Timebase −4 min 39 s, edge publisher −1 min 54 s | NTP on both |
 | 0.12 | P09 tags swapped? (O-19) and comparison rule (O-17) | OT, then owner | ⏳ Open | ADR-0007 | Check the HMI screen |
 | 0.13 | URS v1.1 approval and change requests | Owner | ⏳ Open | Change requests in ADR-0006, 0009, 0010, 0027 | Approve and raise them |
@@ -28,7 +28,7 @@ and out of git.
 |---|---|---|---|
 | **G0a** | Phase 1 on the simulator | URS approved · ADR-0001, 0003, 0006, 0007 accepted · ADR-0002 proposed | Phase 1 started on the simulator on 2026-09-30 by owner decision ([ADR-0014](decisions/ADR-0014-monitor-core.md)); **URS approval** still open |
 | **G0b** | Connecting to the real broker; exit gate G1 | ADR-0002 accepted ✅ · host test passed · M7 confirmed, unless the owner takes it out ([ADR-0021](decisions/ADR-0021-g0b-revised.md)) | Waiting on 0.8 and the owner's M7 decision. M1–M5 are no longer needed |
-| **G0c** | Phase 3 (OCAP and AI) | O-01 closed | Deferred (0.9) |
+| **G0c** | Phase 3's AI: the models, clarification, summaries, translation, embedding search | O-01 closed | Deferred (0.9). The rest of Phase 3 started without it on 2026-10-06 ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)): the OCAP library, keyword search, the workflow's OCAP steps |
 
 ## What Phase 0 found
 

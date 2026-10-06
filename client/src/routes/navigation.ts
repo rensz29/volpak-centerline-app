@@ -1,6 +1,7 @@
 import {
   Activity,
   BellRing,
+  BookOpen,
   ClipboardList,
   GitCompareArrows,
   History,
@@ -42,6 +43,7 @@ export const ROUTES = {
   maintenance: '/maintenance',
   notifications: '/notifications',
   reasons: '/reasons',
+  ocaps: '/ocaps',
 } as const
 
 export const navSections: NavSection[] = [
@@ -85,6 +87,12 @@ export const navSections: NavSection[] = [
         icon: ClipboardList,
         description: "Each HMI mismatch asks the shift's operator why; Managers guide",
         showReasonCount: true,
+      },
+      {
+        label: 'OCAP Library',
+        to: ROUTES.ocaps,
+        icon: BookOpen,
+        description: 'The out-of-control action plans offered after a reason; Managers upload and activate them',
       },
       {
         label: 'Notifications',

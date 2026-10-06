@@ -13,7 +13,7 @@ something, it is authoritative. Phase 0 progress is tracked in [docs/phase-0.md]
 | Folder | What it holds |
 |---|---|
 | [client/](client/README.md) | The web app: React, TypeScript, Vite |
-| [services/api/](services/api/README.md) | The api (FastAPI): sign-in, configuration, live monitoring, alarms, reasons, notifications, Analytics |
+| [services/api/](services/api/README.md) | The api (FastAPI): sign-in, configuration, live monitoring, alarms, reasons, the OCAP library, notifications, Analytics |
 | [services/monitor_core/](services/monitor_core/README.md) | monitor-core: subscribes to the broker, judges every zone, writes events and the outbox |
 | [services/notifier/](services/notifier/README.md) | The notifier: delivers the outbox to Teams and email |
 | `services/common/` | Code the services share, with no web framework in it |
@@ -23,7 +23,7 @@ something, it is authoritative. Phase 0 progress is tracked in [docs/phase-0.md]
 | [deploy/host-check/](deploy/host-check/README.md) | Checks for the control-room PC (G0b) |
 | `config/` | The parameter register. Connection settings, secrets and backups stay here too, git-ignored |
 | `tools/` | Phase 0 probes and analyses, the MQTT simulator and a local stand-in for Teams and SMTP |
-| [tests/acceptance/](tests/acceptance/README.md) | The URS acceptance suites the phase gates run: AT-04…06 for G2, AT-ANA-01…10 for G4 |
+| [tests/acceptance/](tests/acceptance/README.md) | The URS acceptance suites the phase gates run: AT-04…06 for G2, AT-08's deterministic part for G3, AT-ANA-01…10 for G4 |
 | [tests/fixtures/analytics/](tests/fixtures/analytics/README.md) | The Analytics reference dataset and its independently calculated results |
 
 ## Run it on a development PC
@@ -58,6 +58,7 @@ permanent history.
   - to the plant broker (10.156.116.176:1883) and to Timebase (10.156.116.179:4516);
   - from the operators' and Managers' browsers to the port you choose below (6040 by default);
   - to the Teams flow and the SMTP relay, once IT gives them (O-05).
+- **About 1 GB of memory for clamav**, the malware scanner for uploaded OCAPs.
 - **Internet, to build the images.** Without it, see [Without internet on the plant network](#without-internet-on-the-plant-network).
 
 ### 2. Get the code and prepare the machine's settings
@@ -83,14 +84,21 @@ Both are git-ignored and stay on that machine.
 Edit `deploy/.env`:
 
 ```bash
-CENTERLINE_SITE=centerline.plant.local, 10.156.116.50   # every name and address browsers will use
-CENTERLINE_DEFAULT_SNI=10.156.116.50                     # the address, for browsers that open it by IP
+CENTERLINE_SCHEME=http                                   # plain HTTP (the default) or https
 CENTERLINE_BIND=0.0.0.0                                  # all network interfaces: the plant LAN too
-CENTERLINE_PORT=6040                                     # the port browsers use: https://<name>:6040
+CENTERLINE_PORT=6040                                     # the port browsers use: http://<name or address>:6040
 ```
 
-The names and addresses above are examples: use the machine's own. Ask IT for a DNS name pointing at it, and open
-the port in the machine's firewall.
+Open the port in the machine's firewall. Over HTTP any name or address of the machine works, and there's no
+certificate to trust. But passwords and session cookies cross the network unencrypted: test on a network you trust
+([ADR-0032](docs/decisions/ADR-0032-docker-stack-over-http.md)). HTTP or HTTPS at go-live is the owner's decision (O-25).
+
+For HTTPS, set `CENTERLINE_SCHEME=https` and list every name and address browsers will use, for the certificate:
+
+```bash
+CENTERLINE_SITE=centerline.plant.local, 10.156.116.50   # examples: use the machine's own
+CENTERLINE_DEFAULT_SNI=10.156.116.50                     # the address, for browsers that open it by IP
+```
 
 ### 4. Start it and create the first account
 
@@ -101,10 +109,11 @@ docker compose -f deploy/compose.yaml exec api python -m centerline_api.auth cre
     --username szyrelle --name "Szyrelle" --out /app/config/secrets/first-admin-password
 ```
 
-Open `https://<name>:6040` and sign in with the temporary password in
+Open `http://<name or address>:6040` and sign in with the temporary password in
 `deploy/config/secrets/first-admin-password` (valid 24 h). Choose your own password, then delete the file.
 
-The proxy signs its own certificate, so browsers warn until its CA is trusted. Export the CA:
+With HTTPS, open `https://<name>:6040`. The proxy signs its own certificate, so browsers warn until its CA is
+trusted. Export the CA:
 
 ```bash
 docker compose -f deploy/compose.yaml cp proxy:/data/caddy/pki/authorities/local/root.crt centerline-ca.crt
@@ -122,6 +131,8 @@ On the Configuration page, as an Administrator, then as a Manager:
 4. **Notifications:** who gets which messages. Then **Reasons**, and **Analytics ranges** once process engineering
    fills in the template.
 5. **Accounts:** the Managers and the operators.
+6. **OCAP library** (a Manager): upload the plant's OCAPs, PDF or Word, check each one's sections and activate it
+   ([ADR-0031](docs/decisions/ADR-0031-ocap-library-deterministic-path.md)). Until then, every reason goes to a Manager's guidance.
 
 **Operator workstations:** operators sign in only at the line's desks (SES-04). Put the desks' addresses in
 `deploy/config/api.json` under `auth.operator_workstations`, for example
@@ -158,7 +169,8 @@ Build the images where there is internet, and carry them over:
 
 ```bash
 docker compose -f deploy/compose.yaml build
-docker save centerline-services:latest centerline-web:latest pgvector/pgvector:pg17 | gzip > centerline-images.tar.gz
+docker pull clamav/clamav:stable
+docker save centerline-services:latest centerline-web:latest pgvector/pgvector:pg17 clamav/clamav:stable | gzip > centerline-images.tar.gz
 ```
 
 On the plant machine, after `git clone` (or a copy of the repository) and `setup.sh`:
@@ -167,6 +179,8 @@ On the plant machine, after `git clone` (or a copy of the repository) and `setup
 gunzip -c centerline-images.tar.gz | docker load
 docker compose -f deploy/compose.yaml up -d          # no --build: it uses the loaded images
 ```
+
+The clamav image carries the signatures of the day it was pulled; keeping them current there is O-24.
 
 The services run as user id 1000. If `deploy/config` belongs to another user there, either set `CENTERLINE_UID` in
 `deploy/.env` and build on that machine, or give it to 1000: `sudo chown -R 1000:1000 deploy/config`.
@@ -202,4 +216,5 @@ no image contains any of them:
 - `services/api/config.json`;
 - the monitor-core journal (`data/`).
 
-In Docker only the proxy is published, over HTTPS; the development api stays on 127.0.0.1.
+In Docker only the proxy is published, over plain HTTP unless `deploy/.env` says HTTPS (ADR-0032); the development
+api stays on 127.0.0.1.

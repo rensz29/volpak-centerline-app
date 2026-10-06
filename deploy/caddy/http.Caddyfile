@@ -1,0 +1,10 @@
+# The proxy over plain HTTP (ADR-0032), the default: any name or address the browser uses, on the container's port
+# 8080, published as CENTERLINE_PORT (deploy/.env). Passwords and session cookies cross the network unencrypted.
+{
+	admin off
+	auto_https off
+}
+
+:8080 {
+	import app.caddy
+}

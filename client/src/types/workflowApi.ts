@@ -1,8 +1,12 @@
-/** The reason workflow (ADR-0025): each HMI mismatch asks that shift's operator why. */
+import type { OcapSection } from './ocapApi'
+
+/** The reason workflow (ADR-0025, ADR-0031): each HMI mismatch asks that shift's operator why, then offers the OCAP
+ * sections that match, or a Manager's guidance. */
 
 export type RequestStatus =
   | 'waiting_reason'
   | 'waiting_answers'
+  | 'waiting_ocap'
   | 'waiting_guidance'
   | 'waiting_acknowledgment'
   | 'done'
@@ -11,7 +15,7 @@ export type RequestStatus =
   | 'superseded'
   | 'cancelled'
 
-export type Step = 'reason' | 'answers' | 'guidance' | 'acknowledgment'
+export type Step = 'reason' | 'answers' | 'ocap' | 'guidance' | 'acknowledgment'
 
 export interface ShiftView {
   code: 'A' | 'B' | 'C'
@@ -20,14 +24,34 @@ export interface ShiftView {
   endsAt: string
 }
 
+export interface WorkflowAttachment {
+  id: string
+  name: string
+  mediaType: string
+  size: number
+  scan: 'clean' | 'not_scanned'
+}
+
 export interface WorkflowEntry {
-  kind: 'reason' | 'answer' | 'guidance' | 'acknowledgment'
+  kind: 'reason' | 'answer' | 'ocap_choice' | 'guidance' | 'acknowledgment'
   at: string
   by: string
   /** For an answer: the question as it was asked */
   question: string | null
-  /** As typed, English or Filipino */
+  /** As typed, English or Filipino; for an OCAP choice, the section's citation or "None of these apply" */
   body: string
+  /** For an OCAP choice: the section chosen, in full */
+  section?: OcapSection | null
+  /** For a guidance: its file */
+  attachment?: WorkflowAttachment
+}
+
+/** An OCAP section offered after the reason (at most 3, best first), without its body. */
+export interface OcapOffer extends Omit<OcapSection, 'body'> {
+  rank: number
+  score: number
+  /** The section's opening words */
+  excerpt: string
 }
 
 export interface WorkflowRequest {
@@ -53,6 +77,7 @@ export interface WorkflowRequest {
     open: boolean
     state: string
   }
+  offered: OcapOffer[]
   entries: WorkflowEntry[]
   questions?: string[]
 }

@@ -1,7 +1,8 @@
 # ADR-0025: Shifts, the handover and the reason workflow (Phase 2, second slice)
 
 - **Status:** Accepted. Amended by [ADR-0028](ADR-0028-polling-idempotency-g2-acceptance.md) (2026-10-06): polling stays instead of the WebSocket, and a closed
-  request's status is the purge
+  request's status is the purge. Amended by [ADR-0031](ADR-0031-ocap-library-deterministic-path.md) (2026-10-06): after the answers, up to three OCAP
+  sections are offered, and a Manager guides only when none apply; the guidance can carry one file or become a reusable OCAP
 - **Date:** 2026-10-01
 - **Decider:** Szyrelle (system owner), on 2026-10-01:
   - an unfinished request at the shift's end closes, and the next shift gets a new one;

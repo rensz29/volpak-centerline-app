@@ -1,0 +1,16 @@
+# The proxy over HTTPS (SDD §3), with CENTERLINE_SCHEME=https in deploy/.env: Caddy's own local CA signs a certificate
+# for each name, on the container's port 8080, published as CENTERLINE_PORT.
+#
+# CENTERLINE_SITE (deploy/.env): the names and addresses browsers open it at, comma-separated, e.g.
+# "localhost, centerline.plant.local, 10.156.116.50". Its certificate covers each of them.
+{
+	admin off
+	https_port 8080
+	default_sni {$CENTERLINE_DEFAULT_SNI:localhost}
+}
+
+{$CENTERLINE_SITE:localhost} {
+	tls internal
+	import app.caddy
+	header Strict-Transport-Security "max-age=31536000"
+}

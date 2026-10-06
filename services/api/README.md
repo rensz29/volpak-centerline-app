@@ -1,4 +1,4 @@
-# Centerline api: Analytics, Configuration, Monitoring, Notifications and Reasons
+# Centerline api: Analytics, Configuration, Monitoring, Notifications, Reasons and OCAPs
 
 The api service from the SDD (§3, §10). So far it contains:
 
@@ -30,10 +30,19 @@ The api service from the SDD (§3, §10). So far it contains:
   Manager's acknowledgment of a Critical is the one thing written here.
 - **Accounts, sign-in and roles** ([ADR-0016](../../docs/decisions/ADR-0016-accounts-sign-in-and-roles.md)): local accounts, server-side sessions,
   and the owner's decisions on who may do what, checked on every call. An operator's session ends with its shift ([ADR-0025](../../docs/decisions/ADR-0025-shifts-and-reasons.md)).
-- **The reason workflow** ([ADR-0025](../../docs/decisions/ADR-0025-shifts-and-reasons.md)). monitor-core makes a request for every HMI mismatch, one per shift. Here:
+- **The reason workflow** ([ADR-0025](../../docs/decisions/ADR-0025-shifts-and-reasons.md), [ADR-0031](../../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)). monitor-core makes a request for every HMI mismatch, one per shift. Here:
   - the operator gives the reason and answers the follow-up questions;
-  - a Manager gives guidance, and the operator acknowledges it;
+  - up to three sections of the Active OCAPs are offered; the operator chooses one and acknowledges it, or says none
+    of them apply;
+  - then a Manager gives guidance, with one PDF or Word file and, if they like, kept as a reusable OCAP; the operator
+    acknowledges it;
   - an Administrator sets the questions.
+- **The OCAP library** ([ADR-0031](../../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)), without AI for now:
+  - a Manager uploads a PDF or Word file (20 MB at most), scanned by ClamAV before it's kept;
+  - it's read into sections with their pages, as a Draft;
+  - the Manager activates it, keeping or retiring the earlier version, or suspends one;
+  - every role reads the library and searches the Active versions by keyword (PostgreSQL full-text search,
+    English or Filipino).
 
 > **Sign in first.** Every endpoint except signing in and `/api/v1/health/live`
 > needs an account. The HTTPS proxy isn't in place yet, so keep the api on
@@ -92,7 +101,9 @@ Interactive API docs are at <http://127.0.0.1:8000/api/docs>.
 | `analytics.fetch_window_s`, `fetch_workers` | 6 h per Timebase request, 3 in parallel |
 | `auth.operator_workstations` | `[{"name": "Line desk", "ip": "10.0.0.5"}, …]`: operators sign in only there (SES-04). Empty (the default): no operator can sign in yet |
 | `auth.trusted_proxies` | The proxy's address: from it, `X-Forwarded-For` gives the browser's address |
+| `auth.secure_cookie` | Mark the session cookie `Secure` (default true). Left out, it's false when `CENTERLINE_SCHEME=http`, as the Docker stack's plain-HTTP proxy sets it ([ADR-0032](../../docs/decisions/ADR-0032-docker-stack-over-http.md)) |
 | `auth.*` (others) | The URS values, for tests only: 15 min Manager/Administrator inactivity (warned at 13), 5 min operator takeover, 10 privileged sessions, 5 failures lock for 15 min, 24 h temporary passwords, 12-character minimum, last 5 blocked, Argon2id cost |
+| `scanner` | The malware scanner for uploads (SEC-01, ADR-0031): `{"type": "clamd", "host": "clamav", "port": 3310, "timeout_s": 60}` in the Docker stack. Default `{"type": "none"}`, for a development PC only: uploads are kept marked *not scanned*. With `clamd` and no answer, uploads are refused |
 | `cors_origins` | Browser origins allowed to call the api directly |
 | `audit_log` | JSON-lines log of query metadata (no data) |
 
@@ -172,8 +183,12 @@ kept: a repeat answers 409. Times in answers are ISO 8601 UTC ending in `Z`.
 | PUT | `/api/v1/config/connections/notifications` | Administrator: the link base, the Teams flow URL and the SMTP relay; the URL and the password are write-only |
 | POST | `/api/v1/config/connections/notifications/email-test` | Administrator: connect to the relay and sign in, sending nothing |
 | GET | `/api/v1/workflow/requests`, `/workflow/requests/{id}` | Reason requests with every entry, the follow-up questions in effect and the counts per step: an operator sees the shift's, others the open ones and the last day's |
-| POST | `/api/v1/workflow/requests/{id}/reason`, `/answers`, `/acknowledge` | The shift's operator: the reason (kept as typed), the answers in the questions' order, the acknowledgment of the guidance. 409 out of order, for another shift, or closed |
-| POST | `/api/v1/workflow/requests/{id}/guidance` | Manager: the guidance for the operator (GDE-01) |
+| POST | `/api/v1/workflow/requests/{id}/reason`, `/answers`, `/ocap`, `/acknowledge` | The shift's operator: the reason (kept as typed), the answers in the questions' order, the OCAP section chosen among those offered (`sectionId`, or `null`: none of these apply), the acknowledgment of the section or the guidance. 409 out of order, for another shift, or closed |
+| POST | `/api/v1/workflow/requests/{id}/guidance` | Manager: the guidance for the operator (GDE-01); `attachment` (one PDF or Word file, base64, scanned) and `reusable` (`code`, `title`, `language`: also kept as an OCAP, active at once) are optional |
+| GET | `/api/v1/workflow/attachments/{id}` | A guidance's file, as uploaded |
+| GET | `/api/v1/ocaps`, `/ocaps/search?q=`, `/ocaps/versions/{id}`, `/ocaps/versions/{id}/original`, `/ocaps/sections/{id}` | Every OCAP with its versions and their status; the Active sections that match the words, with an excerpt («…» around the matches); one version read into sections, with its history and whether the stored file still matches its SHA-256; the file as uploaded; one section with its citation |
+| POST | `/api/v1/ocaps`, `/ocaps/{id}/versions` | Manager: a new OCAP (`code`, `title`, `language` `en` or `fil`, the file as base64, a reason), or a new version of one. Scanned, then read; a Draft. 422 for an infected or unreadable file (an old `.doc`, a scan without text), 503 with no scanner answering |
+| POST | `/api/v1/ocaps/versions/{id}/activate`, `/suspend` | Manager: search it from now on (`earlier`: `keep` the OCAP's other Active versions or `supersede` them), or stop searching it; with a reason, audited |
 | GET, PUT | `/api/v1/config/workflow` | The follow-up questions and their changes; Administrator: change them (up to two, with a reason; audited) |
 
 Variables are `<parameter>.<zone>.actual` or `<parameter>.<zone>.setpoint`
@@ -231,7 +246,8 @@ back on the page yet, but every version is kept.
 ## Tests
 
 ```bash
-cd services && .venv/bin/python -m pytest      # 148 api tests (258 with monitor-core's, the notifier's and the acceptance suites), run as centerline_app: unit, schema, API against the mock Timebase and the database, MQTT on a local Mosquitto
+cd services && .venv/bin/python -m pytest      # 167 api tests (281 with monitor-core's, the notifier's and the acceptance suites), run as centerline_app: unit, schema, API against the mock Timebase and the database, MQTT on a local Mosquitto
+CENTERLINE_TEST_CLAMD=127.0.0.1:3310 .venv/bin/python -m pytest api/tests/test_ocap_units.py   # also scan the samples with a real clamd
 ```
 
 The tests use the register the mock Timebase was built for
@@ -241,6 +257,10 @@ development database running. Each test gets a
 fresh, migrated `centerline_test_*` database, dropped afterwards, so the
 `centerline` database is never touched. Without the database those tests are
 skipped, and so is the Mosquitto test when `mosquitto` isn't installed.
+
+The OCAP tests read OCAPs generated by `tests/ocap_samples.py` (fpdf2 and python-docx), since the plant's real ones
+aren't in the repository, and scan with a stand-in that speaks clamd's protocol. EICAR, the antivirus test file, is
+hidden inside a Word file there: a real clamd finds it at the start of a file or of an archive's member only.
 
 Statistics are checked against Python's `statistics.correlation` and
 `linear_regression`. The API tests run against

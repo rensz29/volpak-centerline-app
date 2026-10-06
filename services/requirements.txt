@@ -5,6 +5,9 @@ pydantic>=2.7
 paho-mqtt>=2.1,<3
 psycopg[binary]>=3.2,<4
 argon2-cffi>=23.1,<26
+pdfplumber>=0.11,<0.12
+python-docx>=1.1,<2
 # development and tests
 pytest>=8
+fpdf2>=2.8,<3  # test OCAPs as PDFs (LGPL: never in an image)
 httpx2

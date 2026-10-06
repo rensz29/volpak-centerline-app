@@ -1,9 +1,10 @@
-import type { RequestStatus, WorkflowRequest } from '@/types/workflowApi'
+import type { RequestStatus, WorkflowEntry, WorkflowRequest } from '@/types/workflowApi'
 
-/** How the Reasons page names each state of a request (ADR-0025). */
+/** How the Reasons page names each state of a request (ADR-0025, ADR-0031). */
 export const STATUS_LABEL: Record<RequestStatus, string> = {
   waiting_reason: 'Waiting for the reason',
   waiting_answers: 'Waiting for the answers',
+  waiting_ocap: 'Waiting for the operator to choose an OCAP',
   waiting_guidance: "Waiting for a Manager's guidance",
   waiting_acknowledgment: 'Waiting for the operator to acknowledge',
   done: 'Done',
@@ -16,6 +17,7 @@ export const STATUS_LABEL: Record<RequestStatus, string> = {
 export const STATUS_TONE: Record<RequestStatus, 'warning' | 'normal' | 'neutral' | 'critical' | 'outline'> = {
   waiting_reason: 'warning',
   waiting_answers: 'warning',
+  waiting_ocap: 'warning',
   waiting_guidance: 'warning',
   waiting_acknowledgment: 'warning',
   done: 'normal',
@@ -23,6 +25,14 @@ export const STATUS_TONE: Record<RequestStatus, 'warning' | 'normal' | 'neutral'
   resolved: 'neutral',
   superseded: 'neutral',
   cancelled: 'neutral',
+}
+
+export const ENTRY_LABEL: Record<WorkflowEntry['kind'], string> = {
+  reason: 'Reason',
+  answer: 'Answer',
+  ocap_choice: 'OCAP',
+  guidance: 'Guidance',
+  acknowledgment: 'Acknowledged',
 }
 
 /** Whether this person is the one the request waits for. */

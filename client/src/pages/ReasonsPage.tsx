@@ -14,9 +14,10 @@ import type { WorkflowRequest } from '@/types/workflowApi'
 import { formatManilaTime } from '@/utils/manilaTime'
 
 /**
- * Reasons (WF-01…03, ADR-0025): every HMI mismatch asks that shift's operator why. Operators see
- * their shift's requests and answer them; Managers see every open one and give guidance; everyone
- * else reads. Requests still open 15 min after they were made have alerted Management.
+ * Reasons (WF-01…03, ADR-0025, ADR-0031): every HMI mismatch asks that shift's operator why, then offers the OCAP
+ * sections that match. Operators see their shift's requests, answer them and choose an OCAP; Managers see every open
+ * one and guide when no OCAP applies; everyone else reads. Requests still open 15 min after they were made have
+ * alerted Management.
  */
 export function ReasonsPage() {
   const { isOperator, isManager } = useRoles()
@@ -44,8 +45,8 @@ export function ReasonsPage() {
         title="Reasons"
         description={
           isOperator
-            ? `Every HMI mismatch this shift asks you why. Give your reason, answer the follow-up questions, and acknowledge the Manager's guidance. ${list ? `${list.shift.label.split(' (')[0]} ends at ${formatManilaTime(Date.parse(list.shift.endsAt)).slice(0, 5)}.` : ''}`
-            : "Every HMI mismatch asks that shift's operator why. Managers give guidance once the reason is in; a request still open after 15 min alerts Management."
+            ? `Every HMI mismatch this shift asks you why. Give your reason, answer the follow-up questions, choose the OCAP section that fits, and acknowledge it or the Manager's guidance. ${list ? `${list.shift.label.split(' (')[0]} ends at ${formatManilaTime(Date.parse(list.shift.endsAt)).slice(0, 5)}.` : ''}`
+            : "Every HMI mismatch asks that shift's operator why, then offers the matching OCAP sections. Managers guide when none apply; a request still open after 15 min alerts Management."
         }
         breadcrumbs={[{ label: 'Alarms' }, { label: 'Reasons' }]}
       />

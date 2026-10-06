@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from . import shifts
 from .db import uuid7
 
-OPEN = ["waiting_reason", "waiting_answers", "waiting_guidance", "waiting_acknowledgment"]
+OPEN = ["waiting_reason", "waiting_answers", "waiting_ocap", "waiting_guidance", "waiting_acknowledgment"]
 CLOSED_BY = {"RESOLVED": "resolved", "SUPERSEDED": "superseded"}  # any other closing state cancels it
 ESCALATE_AFTER = timedelta(minutes=15)  # WF-03
 

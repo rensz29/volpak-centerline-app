@@ -31,7 +31,7 @@ def _session(client) -> str:
 def test_every_post_needs_a_key_except_those_that_save_nothing(make_client):
     posts = {path for path, ops in make_client(roles=None).app.openapi()["paths"].items() if "post" in ops}
     assert {p for p in posts if EXEMPT.fullmatch(p)} == SAVE_NOTHING
-    assert len(posts - SAVE_NOTHING) == 25  # a new POST route is a decision: add it to SAVE_NOTHING only if it saves nothing
+    assert len(posts - SAVE_NOTHING) == 30  # a new POST route is a decision: add it to SAVE_NOTHING only if it saves nothing
 
 
 def test_a_creating_post_needs_a_key_and_a_read_only_one_doesnt(make_client):

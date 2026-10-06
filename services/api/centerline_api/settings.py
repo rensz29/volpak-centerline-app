@@ -57,7 +57,18 @@ class AuthSettings:
     argon2_time_cost: int = 3  # RFC 9106's second recommended profile: 64 MiB, 3 passes, 4 lanes
     argon2_memory_kib: int = 65536
     argon2_parallelism: int = 4
-    secure_cookie: bool = True  # browsers accept Secure cookies on http://localhost too
+    secure_cookie: bool = True  # browsers accept Secure cookies on http://localhost too, but not on http://<address>
+
+
+@dataclass(frozen=True)
+class ScannerSettings:
+    """Malware scanning of uploads (SEC-01, ADR-0031): clamd in production; "none" only on a development PC, where
+    every upload is marked not scanned."""
+
+    type: str = "none"  # "clamd" or "none"
+    host: str = "127.0.0.1"
+    port: int = 3310
+    timeout_s: float = 60.0
 
 
 @dataclass(frozen=True)
@@ -66,6 +77,7 @@ class Settings:
     register_path: Path
     analytics: AnalyticsSettings = field(default_factory=AnalyticsSettings)
     auth: AuthSettings = field(default_factory=AuthSettings)
+    scanner: ScannerSettings = field(default_factory=ScannerSettings)
     cors_origins: tuple[str, ...] = ()
     audit_log: Path | None = None
     # Configuration page: connections.json, secrets/ and history/ live here (git-ignored)
@@ -93,6 +105,9 @@ def load_settings(path: str | Path | None = None) -> Settings:
             "analytics.ranges_csv is no longer read: an Administrator uploads the file on Configuration → Analytics ranges")
     analytics = AnalyticsSettings(**{k: v for k, v in a.items() if k in known})
     au = raw.get("auth") or {}
+    if "secure_cookie" not in au and os.environ.get("CENTERLINE_SCHEME") == "http":
+        # The Docker stack's proxy serves plain HTTP (ADR-0032): browsers elsewhere wouldn't send a Secure cookie back
+        au = {**au, "secure_cookie": False}
     auth = AuthSettings(**{k: v for k, v in au.items() if k in AuthSettings.__dataclass_fields__
                            and k not in ("operator_workstations", "trusted_proxies")},
                         operator_workstations=tuple((w["name"], w["ip"]) for w in au.get("operator_workstations") or ()),
@@ -102,6 +117,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         register_path=rel(raw.get("register")) or REPO / "config" / "parameter-register.json",
         analytics=analytics,
         auth=auth,
+        scanner=ScannerSettings(**{k: v for k, v in (raw.get("scanner") or {}).items() if k in ScannerSettings.__dataclass_fields__}),
         cors_origins=tuple(raw.get("cors_origins") or ()),
         audit_log=rel(raw.get("audit_log")),
         config_dir=rel(raw.get("config_dir")) or REPO / "config",

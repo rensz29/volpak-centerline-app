@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import replace
 
+import pytest
 from centerline_api.auth import deps
+from centerline_api.settings import load_settings
 
 from .conftest import FAST_AUTH, PASSWORD, add_account, new_client, sign_in
 
@@ -30,6 +33,19 @@ def test_sign_in_with_the_username_email_or_employee_id_in_any_case(make_client,
     assert all(f in cookie for f in ("httponly", "secure", "samesite=strict", "path=/api"))
     assert "Ana Cruz" not in r.headers["set-cookie"]  # the cookie is only a random token
     assert body["session"] == {**body["session"], "kind": "privileged", "idleLimitS": 900, "idleWarningS": 780}
+
+
+@pytest.mark.parametrize(("scheme", "auth", "secure"), [(None, {}, True), ("https", {}, True), ("http", {}, False),
+                                                      ("http", {"secure_cookie": True}, True)])
+def test_the_session_cookie_is_secure_unless_the_proxy_serves_plain_http(tmp_path, monkeypatch, scheme, auth, secure):
+    """Over plain HTTP (ADR-0032) a browser on another PC wouldn't send a Secure cookie back; api.json can still say."""
+    if scheme is None:
+        monkeypatch.delenv("CENTERLINE_SCHEME", raising=False)
+    else:
+        monkeypatch.setenv("CENTERLINE_SCHEME", scheme)
+    path = tmp_path / "api.json"
+    path.write_text(json.dumps({"timebase": {}, "database": {"dbname": "x"}, "auth": auth}))
+    assert load_settings(path).auth.secure_cookie is secure
 
 
 def test_five_wrong_passwords_lock_the_account_for_15_minutes(make_client, database):

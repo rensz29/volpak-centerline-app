@@ -1,5 +1,5 @@
 import { Check, Copy, KeyRound, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 
 import { CheckRow, FormField } from '@/components/setup/FormParts'
 import { ProblemLine } from '@/components/setup/VersionDialogs'
@@ -19,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { accountsApi } from '@/services/authApi'
 import type { ApiProblem } from '@/services/http'
 import { ROLE_LABEL, type Account, type Role, type TemporaryPassword } from '@/types/authApi'
+import { copyText } from '@/utils/clipboard'
 import { formatManilaFull } from '@/utils/manilaTime'
 
 const ROLE_HELP: Record<Role, string> = {
@@ -174,9 +175,9 @@ export function ResetDialog({ account, onDone, onClose }: {
 /** The temporary password, shown this once: it isn't stored anywhere the api can show it again. */
 export function TemporaryPasswordDialog({ result, onClose }: { result: TemporaryPassword; onClose: () => void }) {
   const [copied, setCopied] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
   const copy = () =>
-    void navigator.clipboard
-      .writeText(result.temporaryPassword)
+    void copyText(result.temporaryPassword, box.current)
       .then(() => setCopied(true))
       .catch(() => undefined)
   return (
@@ -187,8 +188,8 @@ export function TemporaryPasswordDialog({ result, onClose }: { result: Temporary
           <DialogDescription>Give it to them in person. It's shown only now.</DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-3">
-          <div className="border-line bg-surface-muted flex items-center justify-between gap-3 rounded-lg border px-4 py-3">
-            <code className="text-ink font-mono text-[18px] tracking-wide">{result.temporaryPassword}</code>
+          <div ref={box} className="border-line bg-surface-muted flex items-center justify-between gap-3 rounded-lg border px-4 py-3">
+            <code className="text-ink font-mono text-[18px] tracking-wide select-all">{result.temporaryPassword}</code>
             <Button type="button" variant="outline" size="sm" onClick={copy}>
               {copied ? <Check className="size-4" aria-hidden /> : <Copy className="size-4" aria-hidden />} {copied ? 'Copied' : 'Copy'}
             </Button>

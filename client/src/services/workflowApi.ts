@@ -1,6 +1,14 @@
+import type { OcapLanguage } from '@/types/ocapApi'
 import type { WorkflowList, WorkflowRequest, WorkflowSettings } from '@/types/workflowApi'
 
 import { json, request } from './http'
+
+/** A Manager's guidance (GDE-01): the text, one PDF or Word file, and whether to keep it as a reusable OCAP. */
+export interface GuidanceBody {
+  text: string
+  attachment?: { name: string; contentBase64: string }
+  reusable?: { code: string; title: string; language: OcapLanguage }
+}
 
 /** The reason workflow (ADR-0025): the requests, each step, and the follow-up questions. */
 export const workflowApi = {
@@ -20,8 +28,17 @@ export const workflowApi = {
     return request<WorkflowRequest>(`/api/v1/workflow/requests/${id}/answers`, json('POST', { answers }))
   },
 
-  guidance(id: string, text: string): Promise<WorkflowRequest> {
-    return request<WorkflowRequest>(`/api/v1/workflow/requests/${id}/guidance`, json('POST', { text }))
+  /** One of the sections offered, or null: none of these apply, so a Manager guides. */
+  ocap(id: string, sectionId: string | null): Promise<WorkflowRequest> {
+    return request<WorkflowRequest>(`/api/v1/workflow/requests/${id}/ocap`, json('POST', { sectionId }))
+  },
+
+  guidance(id: string, body: GuidanceBody): Promise<WorkflowRequest> {
+    return request<WorkflowRequest>(`/api/v1/workflow/requests/${id}/guidance`, json('POST', body))
+  },
+
+  attachmentUrl(attachmentId: string): string {
+    return `/api/v1/workflow/attachments/${attachmentId}`
   },
 
   acknowledge(id: string): Promise<WorkflowRequest> {

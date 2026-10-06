@@ -1,0 +1,22 @@
+# What the proxy serves, over HTTP or HTTPS (imported by http.Caddyfile and https.Caddyfile): the web app, and /api
+# to the api. It overwrites the client-address header, so the api can trust it for the operator workstations (SES-04).
+encode zstd gzip
+
+handle /api/* {
+	reverse_proxy api:8000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
+handle {
+	root * /srv
+	try_files {path} /index.html
+	file_server
+}
+
+header {
+	X-Content-Type-Options nosniff
+	X-Frame-Options DENY
+	Referrer-Policy no-referrer
+	-Server
+}

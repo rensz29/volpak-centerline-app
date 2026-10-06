@@ -54,6 +54,7 @@ dst, dev = sys.argv[1], sys.argv[2]
 db = {"host": "postgres", "port": 5432, "dbname": "centerline"}
 app = {**db, "user": "centerline_app", "password_file": "secrets/postgres-app-password"}
 timebase = {"base_url": "http://10.156.116.179:4516", "dataset": "dressings", "timeout_s": 60, "auth": {"type": "none"}}
+SCANNER = {"type": "clamd", "host": "clamav", "port": 3310, "timeout_s": 60}  # the clamav container (ADR-0031)
 if os.path.exists(dev):
     timebase = json.load(open(dev, encoding="utf-8")).get("timebase") or timebase
 files = {
@@ -66,6 +67,7 @@ files = {
         "database": app,
         "migrate_database": {**db, "user": "centerline", "password_file": "secrets/postgres-password"},
         "auth": {"trusted_proxies": ["proxy"], "operator_workstations": []},
+        "scanner": SCANNER,
     },
     "monitor-core.json": {"database": app, "config_dir": ".", "instance": "centerline-docker", "journal_dir": "/app/data/journal"},
     "notifier.json": {"database": app, "config_dir": ".", "instance": "centerline-docker"},
@@ -78,6 +80,15 @@ for name, content in files.items():
             f.write("\n")
         os.chmod(path, 0o600)
         print(f"wrote    {name}")
+# An api.json from before ADR-0031 gets the scanner; nothing else in it changes
+path = os.path.join(dst, "api.json")
+api = json.load(open(path, encoding="utf-8"))
+if "scanner" not in api:
+    api["scanner"] = SCANNER
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(api, f, indent=2)
+        f.write("\n")
+    print("added    the malware scanner (clamav) to api.json")
 EOF
 
 # Where browsers reach it: this PC only, until deploy/.env says otherwise
@@ -86,9 +97,11 @@ if [[ ! -e "$repo/deploy/.env" ]]; then
 # This host's address for the Docker stack (deploy/compose.yaml). Git-ignored. Restart the proxy after a change:
 #   docker compose -f deploy/compose.yaml up -d proxy
 
-# The names and addresses browsers open Centerline at, comma-separated. The proxy's certificate covers each one.
+# http (the default, ADR-0032): plain HTTP, no certificate. https: Caddy's own CA signs one for CENTERLINE_SITE.
+CENTERLINE_SCHEME=http
+# HTTPS only: the names and addresses browsers open Centerline at, comma-separated. The certificate covers each one.
 CENTERLINE_SITE=localhost
-# The one used when a browser opens it by IP address: put that address here too.
+# HTTPS only: the one used when a browser opens it by IP address: put that address here too.
 CENTERLINE_DEFAULT_SNI=localhost
 # 127.0.0.1: this PC only. 0.0.0.0: the plant LAN too (open the port in the firewall as well).
 CENTERLINE_BIND=127.0.0.1

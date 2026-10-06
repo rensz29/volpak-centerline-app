@@ -1,6 +1,7 @@
 # ADR-0030: The application in Docker, judging the real plant on its own database: a rehearsal for the control-room PC
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended by [ADR-0032](ADR-0032-docker-stack-over-http.md) (2026-10-06): the proxy serves plain HTTP by
+  default; HTTPS with `CENTERLINE_SCHEME=https`
 - **Date:** 2026-10-06
 - **Decider:** Szyrelle (system owner), on 2026-10-06. Asked what the Docker stack should run against while the
   features are tested, the owner chose "the real plant in Docker". The other options were a simulator test stack

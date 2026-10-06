@@ -16,8 +16,9 @@ COLOR = {"CRITICAL": "Attention", "WARNING": "Warning", "MISMATCH": "Warning", "
 # What a reason request still open after 15 min waits for (WF-03, ADR-0025)
 WAITING = {"waiting_reason": "the operator hasn't given a reason yet",
            "waiting_answers": "the operator hasn't answered the follow-up questions yet",
+           "waiting_ocap": "the operator hasn't chosen an OCAP yet",
            "waiting_guidance": "it waits for a Manager's guidance",
-           "waiting_acknowledgment": "the operator hasn't acknowledged the guidance yet"}
+           "waiting_acknowledgment": "the operator hasn't acknowledged the OCAP or the guidance yet"}
 
 
 def manila(t: datetime | str | None) -> str:

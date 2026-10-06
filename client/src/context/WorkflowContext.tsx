@@ -55,7 +55,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   }, [load, isOperator])
 
   const counts = list?.counts
-  const waiting = !counts ? 0 : isOperator ? counts.reason + counts.answers + counts.acknowledgment : isManager ? counts.guidance : 0
+  const waiting = !counts ? 0 : isOperator ? counts.reason + counts.answers + counts.ocap + counts.acknowledgment : isManager ? counts.guidance : 0
   return <WorkflowContext.Provider value={{ list, waiting, refresh: load }}>{children}</WorkflowContext.Provider>
 }
 
