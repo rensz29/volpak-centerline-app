@@ -2,8 +2,9 @@
 # config/, services/, client/ and tools/ have their own .gitignore for the rest
 # (config/secrets/, config/connections.json, config/history/, services/api/config.json, …).
 
-# monitor-core's disk journal (RES-01): steps not yet written to the database
-data/
+# monitor-core's disk journal (RES-01): steps not yet written to the database. Anchored: other data/ folders
+# (client/src/data) belong in git; the tools keep theirs out with their own .gitignore
+/data/
 
 # The Docker stack's settings and secrets on this host (deploy/setup.sh)
 deploy/config/
