@@ -7,7 +7,7 @@ Timebase**, on a database of its own. **Everything it writes is permanent**, as 
 
 | Container | What it is |
 |---|---|
-| `proxy` | Caddy: HTTPS with its own local CA, the web app, `/api` to the api. On **https://localhost:8443** (this PC only) |
+| `proxy` | Caddy: HTTPS with its own local CA, the web app, `/api` to the api. On **https://localhost:6040** (this PC only) |
 | `api` | The api (FastAPI). It migrates the database at start; it isn't published, only the proxy reaches it |
 | `monitor-core` | Subscribes, read-only, to the broker saved on the Connections tab, and judges every zone. MQTT client ID `centerline-monitor-centerline-docker` |
 | `notifier` | Delivers the outbox by the routing in effect |
@@ -45,7 +45,7 @@ docker compose -f deploy/compose.yaml exec api python -m centerline_api.auth cre
 ```
 
 The temporary password is in `deploy/config/secrets/first-admin-password` and works for 24 h. Open
-https://localhost:8443 and sign in. Choose your own password, then delete the file.
+https://localhost:6040 and sign in. Choose your own password, then delete the file.
 
 The browser warns about the certificate the first time: it's signed by the proxy's own CA. Continue, or trust that
 CA on this PC:

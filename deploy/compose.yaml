@@ -2,7 +2,7 @@
 # with their phases: ai-worker, ollama and clamav (Phase 3), backup-agent (Phase 5).
 #
 #   deploy/setup.sh                                      # once: this host's settings in deploy/config
-#   docker compose -f deploy/compose.yaml up -d --build  # then https://localhost:8443
+#   docker compose -f deploy/compose.yaml up -d --build  # then https://localhost:6040
 #
 # It judges the real machine on the plant broker and reads the real Timebase, as the control-room PC will, on its
 # own database. Everything it writes is permanent. One monitor-core judges the line at a time: stop the development
@@ -83,7 +83,7 @@ services:
       context: ..
       dockerfile: deploy/web.Dockerfile
     ports:
-      - "127.0.0.1:8443:443"  # this PC only; on the control-room PC, the plant LAN
+      - "127.0.0.1:6040:443"  # HTTPS, this PC only; on the control-room PC, the plant LAN
     volumes:
       - caddy-data:/data  # its local CA and certificate
       - caddy-config:/config

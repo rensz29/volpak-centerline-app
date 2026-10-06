@@ -33,7 +33,8 @@
    - `deploy/setup.sh` seeds it once from `config/`: the register, the plant connections with the secrets they
      name, and the old history. It makes a new database password and never overwrites a file.
    - No image contains a setting or a secret (`.dockerignore`).
-3. **The proxy is the only way in:** Caddy with its own local CA, on `https://localhost:8443`, this PC only.
+3. **The proxy is the only way in:** Caddy with its own local CA, on `https://localhost:6040`, this PC only. It
+   moved there from 8443 at the owner's request the same day.
    - It serves the web app and passes `/api` on. It overwrites `X-Forwarded-For`.
    - The api trusts that header only from the proxy's fixed address on the stack's own network (172.31.247.0/24),
      so the session cookie's `Secure` flag and the workstation rule (SES-04) work as designed.
