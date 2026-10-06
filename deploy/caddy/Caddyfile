@@ -1,10 +1,14 @@
 # The proxy (SDD §3): HTTPS with Caddy's own local CA, the web app, and /api to the api. It overwrites the
 # client-address header, so the api can trust it for the operator workstations (SES-04).
+#
+# CENTERLINE_SITE (deploy/.env): the names and addresses browsers open it at, comma-separated, e.g.
+# "localhost, centerline.plant.local, 10.156.116.50". Its certificate covers each of them.
 {
 	admin off
+	default_sni {$CENTERLINE_DEFAULT_SNI:localhost}
 }
 
-localhost {
+{$CENTERLINE_SITE:localhost} {
 	tls internal
 	encode zstd gzip
 

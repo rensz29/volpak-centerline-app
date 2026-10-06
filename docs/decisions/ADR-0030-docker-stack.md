@@ -39,6 +39,9 @@
    - The api trusts that header only from the proxy's fixed address on the stack's own network (172.31.247.0/24),
      so the session cookie's `Secure` flag and the workstation rule (SES-04) work as designed.
    - The api and the database aren't published.
+   - Each host sets in `deploy/.env` the names and addresses browsers use (the certificate covers each), the
+     address and port it listens on, and the services' user id. This laptop listens on 127.0.0.1:6040; another
+     machine opens it to the plant LAN (README, "Deploy on another machine").
 4. **It judges the real machine on its own database,** as the control-room PC will. That database starts empty:
    the owner's account is created on the command line, and the configuration is entered again. Or the development
    database is copied in while the new one is still empty; `deploy/README.md` has the commands, tested on

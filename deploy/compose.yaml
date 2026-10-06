@@ -15,6 +15,8 @@ x-python: &python
   build:
     context: ..
     dockerfile: deploy/services.Dockerfile
+    args:
+      UID: ${CENTERLINE_UID:-1000}  # the owner of deploy/config on this host (deploy/.env)
   restart: unless-stopped
   networks: [centerline]
 
@@ -82,8 +84,11 @@ services:
     build:
       context: ..
       dockerfile: deploy/web.Dockerfile
+    environment:
+      CENTERLINE_SITE: ${CENTERLINE_SITE:-localhost}  # the names browsers use (deploy/.env)
+      CENTERLINE_DEFAULT_SNI: ${CENTERLINE_DEFAULT_SNI:-localhost}  # for browsers that open it by IP address
     ports:
-      - "127.0.0.1:6040:443"  # HTTPS, this PC only; on the control-room PC, the plant LAN
+      - "${CENTERLINE_BIND:-127.0.0.1}:${CENTERLINE_PORT:-6040}:443"  # HTTPS; this PC only unless deploy/.env opens it
     volumes:
       - caddy-data:/data  # its local CA and certificate
       - caddy-config:/config

@@ -37,11 +37,152 @@ something, it is authoritative. Phase 0 progress is tracked in [docs/phase-0.md]
    ([ADR-0026](docs/decisions/ADR-0026-real-app-on-the-real-machine.md)). To develop or test, point them at a local
    Mosquitto fed by [tools/mqtt-sim](tools/mqtt-sim/README.md) and a scratch database instead.
 
-## Run it in Docker
+## Deploy on another machine
 
-The same services as containers, judging the real plant on a database of their own, as on the control-room PC:
-[deploy/README.md](deploy/README.md) ([ADR-0030](docs/decisions/ADR-0030-docker-stack.md)). One monitor-core judges
-the line at a time: stop the development ones first.
+The application runs as five containers: the proxy, api, monitor-core, notifier and PostgreSQL. They judge the real
+machine on the plant broker and read the real Timebase, on the machine's own database
+([deploy/README.md](deploy/README.md), [ADR-0030](docs/decisions/ADR-0030-docker-stack.md)). Everything it writes is
+permanent history.
+
+> **Before the control-room PC goes live,** gate G0b still asks for the host test
+> ([deploy/host-check](deploy/host-check/README.md)) and the Timebase admin's confirmation that Timebase refuses
+> writes (M7, [ADR-0021](docs/decisions/ADR-0021-g0b-revised.md)). The SDD's host is a Hyper-V Linux VM with Docker
+> Engine ([ADR-0003](docs/decisions/ADR-0003-host-runtime.md)). Docker Desktop is fine for a trial, but needs someone
+> signed in to Windows.
+
+### 1. What the machine needs
+
+- **Docker Engine with the Compose plugin** ([docs.docker.com/engine/install](https://docs.docker.com/engine/install/)),
+  and git.
+- **Network access:**
+  - to the plant broker (10.156.116.176:1883) and to Timebase (10.156.116.179:4516);
+  - from the operators' and Managers' browsers to the port you choose below (6040 by default);
+  - to the Teams flow and the SMTP relay, once IT gives them (O-05).
+- **Internet, to build the images.** Without it, see [Without internet on the plant network](#without-internet-on-the-plant-network).
+
+### 2. Get the code and prepare the machine's settings
+
+On the development PC, commit and push what you want to deploy (`git push`). Then, on the new machine:
+
+```bash
+git clone https://github.com/rensz29/volpak-centerline-app.git
+cd volpak-centerline-app
+deploy/setup.sh
+```
+
+`setup.sh` creates two things:
+- **`deploy/config/`** (0700): the services' settings and a new database password. The register comes from
+  `config/parameter-register.json` in git, and the broker and Timebase connections from `config/` where they exist.
+  On a new machine they don't, so you enter them on the Configuration page in step 5.
+- **`deploy/.env`:** where the proxy listens.
+
+Both are git-ignored and stay on that machine.
+
+### 3. Let the plant reach it
+
+Edit `deploy/.env`:
+
+```bash
+CENTERLINE_SITE=centerline.plant.local, 10.156.116.50   # every name and address browsers will use
+CENTERLINE_DEFAULT_SNI=10.156.116.50                     # the address, for browsers that open it by IP
+CENTERLINE_BIND=0.0.0.0                                  # all network interfaces: the plant LAN too
+CENTERLINE_PORT=6040                                     # the port browsers use: https://<name>:6040
+```
+
+The names and addresses above are examples: use the machine's own. Ask IT for a DNS name pointing at it, and open
+the port in the machine's firewall.
+
+### 4. Start it and create the first account
+
+```bash
+docker compose -f deploy/compose.yaml up -d --build
+docker compose -f deploy/compose.yaml ps            # api and postgres "healthy", the rest "Up"
+docker compose -f deploy/compose.yaml exec api python -m centerline_api.auth create-admin \
+    --username szyrelle --name "Szyrelle" --out /app/config/secrets/first-admin-password
+```
+
+Open `https://<name>:6040` and sign in with the temporary password in
+`deploy/config/secrets/first-admin-password` (valid 24 h). Choose your own password, then delete the file.
+
+The proxy signs its own certificate, so browsers warn until its CA is trusted. Export the CA:
+
+```bash
+docker compose -f deploy/compose.yaml cp proxy:/data/caddy/pki/authorities/local/root.crt centerline-ca.crt
+```
+
+Install it on each workstation under Trusted Root Certification Authorities, or ask IT to deploy it, or to issue a
+certificate.
+
+### 5. Configure it
+
+On the Configuration page, as an Administrator, then as a Manager:
+1. **Connections:** the broker (host, account, password), Timebase, the Teams flow and the SMTP relay.
+2. **Mappings:** "Fill from the broker", check, then activate.
+3. **Rules:** start from the Phase 0 proposal, give each zone its target, then activate.
+4. **Notifications:** who gets which messages. Then **Reasons**, and **Analytics ranges** once process engineering
+   fills in the template.
+5. **Accounts:** the Managers and the operators.
+
+**Operator workstations:** operators sign in only at the line's desks (SES-04). Put the desks' addresses in
+`deploy/config/api.json` under `auth.operator_workstations`, for example
+`[{"name": "Line desk", "ip": "10.156.116.60"}]`, then `docker compose -f deploy/compose.yaml restart api`.
+
+**One monitor-core judges the line.** Stop any other one, the development PC's or another Docker stack's, before this
+one starts. Otherwise every alarm is recorded twice, in two databases.
+
+### Move the history from another machine
+
+To keep the configuration, accounts and events instead of starting empty, restore a backup in place of step 4, before
+the stack's first start. On the old machine:
+
+```bash
+(umask 077; docker compose -f deploy/compose.yaml exec -T postgres pg_dump -U centerline -Fc centerline > centerline.dump)
+```
+
+Copy `centerline.dump` privately: it holds the accounts and the history. Then, on the new machine:
+
+```bash
+docker compose -f deploy/compose.yaml up -d postgres
+docker compose -f deploy/compose.yaml exec -T postgres psql -U centerline -d centerline -c "CREATE ROLE centerline_app LOGIN"
+docker compose -f deploy/compose.yaml exec -T postgres pg_restore -U centerline -d centerline < centerline.dump
+docker compose -f deploy/compose.yaml up -d --build
+```
+
+The accounts come with the backup, so skip `create-admin` and sign in as before. From the development database, make
+the backup with `docker exec centerline-dev-postgres-1 pg_dump -U centerline -Fc centerline > centerline.dump`
+instead. The api applies any migrations the backup lacks.
+
+### Without internet on the plant network
+
+Build the images where there is internet, and carry them over:
+
+```bash
+docker compose -f deploy/compose.yaml build
+docker save centerline-services:latest centerline-web:latest pgvector/pgvector:pg17 | gzip > centerline-images.tar.gz
+```
+
+On the plant machine, after `git clone` (or a copy of the repository) and `setup.sh`:
+
+```bash
+gunzip -c centerline-images.tar.gz | docker load
+docker compose -f deploy/compose.yaml up -d          # no --build: it uses the loaded images
+```
+
+The services run as user id 1000. If `deploy/config` belongs to another user there, either set `CENTERLINE_UID` in
+`deploy/.env` and build on that machine, or give it to 1000: `sudo chown -R 1000:1000 deploy/config`.
+
+### Update, back up, stop
+
+```bash
+git pull && docker compose -f deploy/compose.yaml up -d --build      # a new version; the api migrates the database
+(umask 077; docker compose -f deploy/compose.yaml exec -T postgres pg_dump -U centerline -Fc centerline \
+   > backup-$(date +%F).dump)                                         # a backup, until the backup-agent (Phase 5)
+docker compose -f deploy/compose.yaml stop                           # stop; everything stays
+docker compose -f deploy/compose.yaml logs -f monitor-core           # any service's log
+```
+
+The containers restart by themselves after a crash or a reboot, unless stopped. `down -v` deletes the database: back
+up first.
 
 ## Tests
 
@@ -52,6 +193,13 @@ cd client && npm run lint && npm run build
 
 ## Secrets
 
-Passwords, tokens and keys live in files under `config/secrets/` (0600), never in code, configuration files or
-logs. That folder, `config/connections.json`, `config/history/`, `services/api/config.json` and the
-monitor-core journal (`data/`) are git-ignored. The api stays on 127.0.0.1 until the HTTPS proxy exists.
+Passwords, tokens and keys live in files under a `secrets/` folder (0600), never in code, configuration files or
+logs: `config/secrets/` on a development PC, `deploy/config/secrets/` on a Docker host. These are git-ignored, and
+no image contains any of them:
+- those folders;
+- `config/connections.json` and `config/history/`;
+- `deploy/config/` and `deploy/.env`;
+- `services/api/config.json`;
+- the monitor-core journal (`data/`).
+
+In Docker only the proxy is published, over HTTPS; the development api stays on 127.0.0.1.

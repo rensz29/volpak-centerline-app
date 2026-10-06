@@ -30,6 +30,10 @@ docker compose -f deploy/compose.yaml up -d --build
 - `setup.sh` copies the register, the plant connections with the secrets they name, and the old history from
   `config/`. It makes a new database password; the api makes the services' role password at its first start. It
   never overwrites a file.
+- **`deploy/.env`** (git-ignored), also written by `setup.sh`: where the proxy listens and under which names.
+  `CENTERLINE_SITE` and `CENTERLINE_DEFAULT_SNI` are the names and address browsers use, `CENTERLINE_BIND` and
+  `CENTERLINE_PORT` the address and port (127.0.0.1:6040 here), and `CENTERLINE_UID` the owner of `deploy/config`.
+  To set it up on another machine, see [the README's deployment guide](../README.md#deploy-on-another-machine).
 
 **One monitor-core judges the line at a time.** Before starting this stack's `monitor-core` and `notifier`, stop the
 development ones started from a terminal (Ctrl+C in their terminals). Two would record every alarm twice, in two
@@ -104,4 +108,5 @@ These wait for the control-room PC (G0b):
   To let an operator sign in here for a test, add that address to `auth.operator_workstations` in
   `deploy/config/api.json` and restart the api (`docker compose … restart api`). The refusal message names it:
   "This browser (…) isn't the primary or backup operator workstation".
-- **The plant LAN reaching it:** the proxy listens on 127.0.0.1 only.
+- **The plant LAN reaching it:** on this laptop the proxy listens on 127.0.0.1 only. `deploy/.env` opens it, as
+  [the README's deployment guide](../README.md#deploy-on-another-machine) describes.

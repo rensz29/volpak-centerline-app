@@ -80,4 +80,23 @@ for name, content in files.items():
         print(f"wrote    {name}")
 EOF
 
+# Where browsers reach it: this PC only, until deploy/.env says otherwise
+if [[ ! -e "$repo/deploy/.env" ]]; then
+  cat > "$repo/deploy/.env" <<'ENV'
+# This host's address for the Docker stack (deploy/compose.yaml). Git-ignored. Restart the proxy after a change:
+#   docker compose -f deploy/compose.yaml up -d proxy
+
+# The names and addresses browsers open Centerline at, comma-separated. The proxy's certificate covers each one.
+CENTERLINE_SITE=localhost
+# The one used when a browser opens it by IP address: put that address here too.
+CENTERLINE_DEFAULT_SNI=localhost
+# 127.0.0.1: this PC only. 0.0.0.0: the plant LAN too (open the port in the firewall as well).
+CENTERLINE_BIND=127.0.0.1
+CENTERLINE_PORT=6040
+# The services run as this user id, the owner of deploy/config (rebuild after a change: up -d --build)
+ENV
+  echo "CENTERLINE_UID=$(id -u)" >> "$repo/deploy/.env"
+  echo "wrote    deploy/.env (this PC only, port 6040, user id $(id -u))"
+fi
+
 echo "deploy/config is ready. Next: docker compose -f deploy/compose.yaml up -d --build (see deploy/README.md)"
