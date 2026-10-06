@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from decimal import Decimal
 
+from centerline_common.isotime import iso
 from monitor_helpers import at, advance, make_config, rule_rows, start
 from centerline_monitor.effects import BriefChange, Notify, OpenEvent, PauseEnded, PauseStarted, Transition
 
@@ -50,12 +52,28 @@ def test_a_lost_connection_and_a_missing_value_close_the_gate():
     assert not engine.gate.open and any("No valid value" in r for r in engine.reasons)
 
 
-def test_an_unconfigured_or_missing_sku_pauses_and_alerts_management_once():
-    engine, store, line = start(cfg=make_config(skus=("A",), rows=rule_rows(("A",))))
-    line.sku = "UNKNOWN"
+def test_rules_without_every_zones_limits_pause_the_line_and_say_so():
+    rows = [r for r in rule_rows() if not (r["parameter_id"] == "P02" and r["zone_id"] is None)]  # Vertical has no limits
+    engine, store, line = start(cfg=make_config(rows=rows))
     advance(engine, line, 0, 5)
-    assert not engine.gate.open and "SKU UNKNOWN has no complete rules in effect" in engine.reasons
-    assert len(store.of(Notify, kind="system")) == 1  # OPC-08, once per pause
+    assert not engine.gate.open
+    assert engine.reasons == ["The rules in effect don't give every zone its Warning and Critical limits (Configuration → Rules)"]
+    (alert,) = store.of(Notify, kind="system")  # once, while the data is complete but the rules aren't (OPC-08)
+    assert alert.payload["kind"] == "Rules incomplete (OPC-08)"
+    advance(engine, line, 5, 60)
+    assert len(store.of(Notify, kind="system")) == 1
+
+
+def test_a_zone_without_a_target_is_judged_on_its_actual_value_only():
+    rows = [r for r in rule_rows() if not (r["parameter_id"] == "P02" and r["zone_id"] == "V1")]  # no target for Vertical 1
+    engine, store, line = start(cfg=make_config(rows=rows))
+    assert engine.gate.open
+    assert (engine.status()["zones"]["P02.V1"]["hmi"], engine.status()["zones"]["P02.V1"]["target"]) == ("NO_TARGET", None)
+    line.set("P02.V1", setpoint=230)  # far from anything: there's no target to compare with
+    line.set("P03.REAR", actual=186)  # 6 above its setpoint: Warning
+    advance(engine, line, 0, 40)
+    (event,) = store.of(OpenEvent)
+    assert (event.kind, event.zone.channel, event.severity) == ("ACTUAL", "P03.REAR", "WARNING")
 
 
 # -- AT-02: HMI mismatch ------------------------------------------------------------------
@@ -194,7 +212,7 @@ def test_warning_notifications_can_be_switched_off_but_criticals_cannot():
     assert store.of(Notify, kind="escalated")
 
 
-# -- pauses, changeovers and versions -------------------------------------------------
+# -- pauses and versions --------------------------------------------------------------
 
 
 def test_actual_rules_pause_while_stopped_and_warm_up_after_a_long_stop():
@@ -224,27 +242,13 @@ def test_a_short_stop_resumes_actual_rules_at_once():
     assert [p.scope for p in store.of(PauseEnded)].count("actual") == 1
 
 
-def test_a_sku_changeover_closes_open_events_without_recovery_notices():
-    engine, store, line = start()
-    line.set("P02.V1", setpoint=222)
-    advance(engine, line, 0, 40)
-    event = store.of(OpenEvent)[0]
-    line.sku = "B"
-    advance(engine, line, 40, 41)
-    assert store.of(Transition, event_id=event.event_id, state="CLOSED_SKU_CHANGEOVER")
-    assert not store.of(Notify, kind="recovery") and len(store.of(Notify, kind="changeover")) == 1
-    advance(engine, line, 41, 42)
-    assert engine.gate.open and engine.sku == "B"
-
-
 def test_an_open_event_keeps_the_rule_it_opened_under():
     engine, store, line = start()
     line.set("P02.V1", setpoint=222)
     advance(engine, line, 0, 40)
     event = store.of(OpenEvent)[0]
-    # Rules v2 moves Vertical 1's target for SKU A to 222
-    rows = [dict(r, target=Decimal(222)) if (r["sku"], r["parameter_id"], r["zone_id"]) == ("A", "P02", "V1") else r
-            for r in rule_rows()]
+    # Rules v2 moves Vertical 1's target to 222
+    rows = [dict(r, target=Decimal(222)) if (r["parameter_id"], r["zone_id"]) == ("P02", "V1") else r for r in rule_rows()]
     engine.configure(make_config(rows=rows, rules_number=2), at(41))
     advance(engine, line, 41, 45)
     assert not store.of(Transition, event_id=event.event_id, state="RESOLVED")  # still judged against 220 (OPC-07)
@@ -264,9 +268,10 @@ def test_the_status_carries_each_zones_values_bands_and_pending_timers():
     front, v1 = z["P03.FRONT"], z["P02.V1"]
     assert (front["setpoint"], front["actual"], front["target"]) == ("180", "186", "180")
     assert front["bands"] == {"warnLow": "175", "warnHigh": "185", "critLow": "170", "critHigh": "190"}
-    assert front["actualSeverity"] == "NORMAL" and front["actualPending"] == "WARNING" and front["actualDue"] == at(31).isoformat()
-    assert v1["hmi"] == "PENDING" and v1["hmiSince"] == at(1).isoformat() and v1["hmiDue"] == at(31).isoformat()
-    assert engine.status()["judging"] and engine.status()["sku"] == "A"
+    assert front["actualSeverity"] == "NORMAL" and front["actualPending"] == "WARNING" and front["actualDue"] == iso(at(31))
+    assert v1["hmi"] == "PENDING" and v1["hmiSince"] == iso(at(1)) and v1["hmiDue"] == iso(at(31))
+    assert "+00:00" not in json.dumps(engine.status(), default=str)  # every time in the heartbeat ends in Z (ADR-0028)
+    assert engine.status()["judging"]
 
 
 def test_the_status_takes_the_target_and_the_bands_each_from_their_own_rule():
@@ -275,9 +280,8 @@ def test_the_status_takes_the_target_and_the_bands_each_from_their_own_rule():
     advance(engine, line, 0, 40)
     assert store.of(OpenEvent)
     # Rules v2 moves the target to 222 and widens P02's Warning band below the setpoint to 3
-    rows = [dict(r, target=Decimal(222)) if (r["sku"], r["parameter_id"], r["zone_id"]) == ("A", "P02", "V1") else r
-            for r in rule_rows()]
-    rows = [dict(r, warn_low=Decimal(3)) if (r["sku"], r["parameter_id"], r["zone_id"]) == (None, "P02", None) else r
+    rows = [dict(r, target=Decimal(222)) if (r["parameter_id"], r["zone_id"]) == ("P02", "V1") else r for r in rule_rows()]
+    rows = [dict(r, warn_low=Decimal(3)) if (r["parameter_id"], r["zone_id"]) == ("P02", None) else r
             for r in rows]
     engine.configure(make_config(rows=rows, rules_number=2), at(41))
     advance(engine, line, 41, 42)
@@ -295,7 +299,7 @@ def test_the_machines_clock_is_kept_as_evidence_and_warned_about_but_never_used_
     assert event.at == at(31)  # judged on our own clock (invariant 13)
     (opened,) = store.of(Transition, event_id=event.event_id, state="OPEN")
     stamped = {t: v for t, v in opened.inputs["payload_clock"].items()}
-    assert stamped and all(v == (at(31) - timedelta(seconds=114)).isoformat() for v in stamped.values())  # the machine's stamp, as evidence
+    assert stamped and all(v == iso(at(31) - timedelta(seconds=114)) for v in stamped.values())  # the machine's stamp, as evidence
     status = engine.status()
     assert set(status["clockSkewS"].values()) == {114.0}
     assert status["clockSkewWarning"].startswith("The machine's clock is 114 s behind ours")

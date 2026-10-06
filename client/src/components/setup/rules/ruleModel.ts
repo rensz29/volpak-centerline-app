@@ -11,8 +11,8 @@ import type {
 /**
  * Client-side helpers for the Rules tab (ADR-0012). The api is the authority on
  * validation and readiness; the layering here only shows what a blank field
- * inherits: this SKU and zone > this SKU > every SKU, this zone > every SKU and
- * zone > line defaults (services/common/centerline_common/rules.py).
+ * inherits: this zone > every zone of the parameter > line defaults
+ * (services/common/centerline_common/rules.py, ADR-0027).
  */
 
 export const LIMIT_FIELDS = ['warnLow', 'warnHigh', 'critLow', 'critHigh'] as const
@@ -81,7 +81,6 @@ export function monitoredParameters(register: RegisterView): MonitoredParameter[
 }
 
 export interface Scope {
-  sku: string | null
   parameterId: string
   zoneId: string | null
 }
@@ -103,7 +102,7 @@ export function emptyRow(scope: Scope): RuleRow {
   }
 }
 
-const same = (r: RuleRow, s: Scope) => r.parameterId === s.parameterId && r.sku === s.sku && r.zoneId === s.zoneId
+const same = (r: RuleRow, s: Scope) => r.parameterId === s.parameterId && r.zoneId === s.zoneId
 
 export function rowIndex(rules: RuleRow[], scope: Scope): number {
   return rules.findIndex((r) => same(r, scope))
@@ -124,20 +123,16 @@ export function setField<F extends RuleField>(rules: RuleRow[], scope: Scope, fi
 
 export interface Effective {
   value: number | string | boolean
-  from: 'sku_zone' | 'sku' | 'zone' | 'parameter' | 'default'
+  from: 'zone' | 'parameter' | 'default'
 }
 
-/** A field's value for a zone (or every zone, zoneId null) under a SKU (or every SKU, sku null). */
+/** A field's value for a zone, or for every zone of the parameter (zoneId null). */
 export function resolve(rules: RuleRow[], defaults: RuleDefaults, scope: Scope, field: RuleField): Effective | null {
-  const layers: [string | null, string | null, Effective['from']][] = []
-  if (scope.sku !== null) {
-    if (scope.zoneId !== null) layers.push([scope.sku, scope.zoneId, 'sku_zone'])
-    layers.push([scope.sku, null, 'sku'])
-  }
-  if (scope.zoneId !== null) layers.push([null, scope.zoneId, 'zone'])
-  layers.push([null, null, 'parameter'])
-  for (const [sku, zoneId, from] of layers) {
-    const value = rules.find((r) => same(r, { sku, zoneId, parameterId: scope.parameterId }))?.[field]
+  const layers: [string | null, Effective['from']][] = []
+  if (scope.zoneId !== null) layers.push([scope.zoneId, 'zone'])
+  layers.push([null, 'parameter'])
+  for (const [zoneId, from] of layers) {
+    const value = rules.find((r) => same(r, { zoneId, parameterId: scope.parameterId }))?.[field]
     if (value !== null && value !== undefined) return { value, from }
   }
   const fallback = field in defaults ? defaults[field as keyof RuleDefaults] : undefined
@@ -161,7 +156,7 @@ export function valueOf(rules: RuleRow[], scope: Scope, field: RuleField): RuleR
 
 /** The proposal's rows carry only the fields they set. */
 export function normalizeRows(rows: RulesProposal['rules']): RuleRow[] {
-  return rows.map((r) => ({ ...emptyRow({ sku: r.sku ?? null, parameterId: r.parameterId, zoneId: r.zoneId ?? null }), ...r }))
+  return rows.map((r) => ({ ...emptyRow({ parameterId: r.parameterId, zoneId: r.zoneId ?? null }), ...r }))
 }
 
 /** "rules[3].critLow" → the message for that row's field. */

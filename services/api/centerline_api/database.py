@@ -50,11 +50,13 @@ def prepare(app: FastAPI, conn, applied: list[str] | None = None) -> None:
     imported = audit.import_legacy(conn, settings.config_dir)  # older entries first, so the chain follows time
     seeded = store.seed(conn)
     conn.commit()
+    without_sku = store.drop_sku(conn)
     app.state.register = store.load(conn)
     app.state.register_file_warning = store.file_status(conn)
     app.state.db_ready = True
     app.state.db_error = None
-    for what, done in (("migrations applied", applied), ("register imported", seeded), ("history entries imported", imported)):
+    for what, done in (("migrations applied", applied), ("register imported", seeded), ("history entries imported", imported),
+                       ("register saved without its SKU entry", without_sku)):
         if done:
             log.info("database: %s: %s", what, done)
 

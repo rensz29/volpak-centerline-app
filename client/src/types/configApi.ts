@@ -105,7 +105,6 @@ export interface MqttCheck {
   }[]
   mapped?: { label: string; tag: string; topic: string; field: string | null }[]
   missing?: { label: string; tag: string }[]
-  skuCandidates?: { topic: string; field: string; value: string }[]
   warnings?: string[]
 }
 
@@ -154,7 +153,6 @@ export interface RegisterView {
   version: string
   namespace: string
   line: { id: string; name: string } | null
-  sku: { status: string; tag: string | null; note?: string } | null
   parameters: RegisterParameter[]
   audit: AuditEntry[]
   /** Set when config/parameter-register.json holds hand edits the database doesn't have. */
@@ -172,9 +170,8 @@ export interface ParameterUpdate {
 
 export type BriefChangeMode = 'do_not_record' | 'lightweight' | 'cleared_before_trigger'
 
-/** One scope of a rules version. sku / zoneId null = every SKU / every zone; a null field is inherited. */
+/** One scope of a rules version: a zone, or every zone of the parameter (zoneId null). A null field is inherited. */
 export interface RuleRow {
-  sku: string | null
   parameterId: string
   zoneId: string | null
   target: number | null
@@ -190,7 +187,7 @@ export interface RuleRow {
   warningNotifications: boolean | null
 }
 
-export type RuleField = Exclude<keyof RuleRow, 'sku' | 'parameterId' | 'zoneId'>
+export type RuleField = Exclude<keyof RuleRow, 'parameterId' | 'zoneId'>
 
 export interface RuleDefaults {
   mismatchDelayS: number
@@ -224,11 +221,6 @@ export interface RulesVersionSummary {
   status: RulesVersionStatus
 }
 
-export interface Sku {
-  code: string
-  name: string
-}
-
 export interface RulesOverview {
   /** `by`: who activated it; null for activations made before sign-in existed */
   active: { number: number; since: string; reason: string; by: string | null } | null
@@ -246,9 +238,8 @@ export interface RulesOverview {
     cancelledBy: string | null
     cancelReason: string | null
   }[]
-  skus: Sku[]
-  /** Per SKU, against the version in effect: an empty list means the SKU can be monitored. */
-  readiness: Record<string, ReadinessGap[]>
+  /** What each zone lacks under the version in effect: limits (the line isn't judged) or a target (its HMI setpoint isn't). */
+  gaps: ReadinessGap[] | null
   registerVersion: string
   created?: number
 }
@@ -263,7 +254,9 @@ export interface RulesVersion {
   intact: boolean
   settings: RulesSettings
   rules: RuleRow[]
-  readiness: Record<string, ReadinessGap[]>
+  gaps: ReadinessGap[]
+  /** A version saved before ADR-0027 for a product code: the rows a new version starts from, with its targets. */
+  carryOver: { from: string; rules: RuleRow[] } | null
 }
 
 export interface RulesProposal {
@@ -284,7 +277,7 @@ export interface RulesDraft {
 
 export interface RulesCheck {
   errors: { field: string; message: string }[]
-  readiness: Record<string, ReadinessGap[]>
+  gaps: ReadinessGap[]
 }
 
 // -- Tag mappings (ADR-0013) ---------------------------------------------------------
@@ -294,11 +287,6 @@ export interface MappingRow {
   tag: string
   topic: string
   field: string | null
-}
-
-export interface SkuPlace {
-  topic: string
-  field: string
 }
 
 export interface RequiredTag {
@@ -331,9 +319,6 @@ export interface MappingsOverview {
   required: RequiredTag[]
   /** Of the version in effect, against the current register. */
   coverage: MappingCoverage | null
-  sku: SkuPlace | null
-  /** A code standing in for the SKU field while the machine publishes none: actual values only (ADR-0022) */
-  skuPlaceholder: string | null
   subscriptions: string[]
   registerVersion: string
   created?: number
@@ -348,8 +333,6 @@ export interface MappingVersion {
   registerVersion: string
   intact: boolean
   rows: MappingRow[]
-  sku: SkuPlace | null
-  skuPlaceholder: string | null
   coverage: MappingCoverage
   warnings: string[]
 }
@@ -358,8 +341,6 @@ export interface MappingDraft {
   expectedLatest: number | null
   basedOn: number | null
   rows: MappingRow[]
-  sku: SkuPlace | null
-  skuPlaceholder?: string | null
   source: string
   reason: string
   activate: 'no' | 'now' | 'at'
@@ -374,7 +355,6 @@ export interface MappingCheck {
 
 export interface MappingImport {
   rows: MappingRow[]
-  sku: SkuPlace | null
   ignored: string[]
   notSeen: string[]
   problems: { line: number; message: string }[]
@@ -387,7 +367,6 @@ export interface MappingDiscovery {
   listenedS?: number
   rows?: MappingRow[]
   notSeen?: string[]
-  skuCandidates?: { topic: string; field: string; value: string }[]
   topics?: string[]
   /** The JSON fields heard on each topic. */
   fields?: Record<string, string[]>

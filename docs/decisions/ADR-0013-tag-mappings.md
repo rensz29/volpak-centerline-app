@@ -1,7 +1,8 @@
 # ADR-0013: Tag mappings on the Configuration page
 
 - **Status:** Accepted. Amended by [ADR-0022](ADR-0022-placeholder-sku.md) (2026-10-01): a version may name a
-  placeholder SKU instead of the SKU field, judged on actual values only
+  placeholder SKU instead of the SKU field, judged on actual values only. Amended again by [ADR-0027](ADR-0027-no-sku.md) (2026-10-05):
+  a mapping names only tags, with no SKU field or placeholder
 - **Date:** 2026-09-30
 - **Decider:** Szyrelle (system owner)
 - **Implements:** [ADR-0006](ADR-0006-mqtt-acquisition.md) decision 3 (tag mapping), on the storage and

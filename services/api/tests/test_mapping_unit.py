@@ -33,10 +33,8 @@ def test_topic_filters_match_like_mqtt():
 
 def test_a_full_mapping_by_convention_is_valid_and_covers_the_register():
     rows = by_convention()
-    errors, warnings = mapping.validate(rows, None, REG, SUBS)
-    assert errors == [] and any("No SKU field" in w for w in warnings)
+    assert mapping.validate(rows, REG, SUBS) == ([], [])
     assert mapping.coverage(rows, REG)["missing"] == []
-    assert mapping.validate(rows, {"topic": f"{BASE}/SPC", "field": "SKU_Code"}, REG, SUBS) == ([], [])
 
 
 def test_validation_names_the_row_and_field():
@@ -46,13 +44,12 @@ def test_validation_names_the_row_and_field():
     rows[3] = {**rows[3], "tag": "SPC.Feed"}  # awaiting a tag, not monitored
     rows.append(dict(rows[4]))  # a tag twice
     rows[5] = {**rows[5], "topic": "other/place"}
-    errors, warnings = mapping.validate(rows, {"topic": f"{BASE}/SPC", "field": " "}, REG, SUBS)
+    errors, warnings = mapping.validate(rows, REG, SUBS)
     fields = {e["field"]: e["message"] for e in errors}
     assert "can't both come from" in fields["rows[1].field"]
     assert "subscriptions" in fields["rows[2].topic"]
     assert "isn't a monitored" in fields["rows[3].tag"]
     assert "appears twice" in fields[f"rows[{len(rows) - 1}].tag"]
-    assert "sku.field" in fields
     assert any("other/place isn't under the connection's topic filters" in w for w in warnings)
     assert len(mapping.coverage(rows, REG)["missing"]) == 1  # SPC.Feed replaced a needed tag
 
@@ -64,9 +61,9 @@ def test_topic_map_and_csv_round_trip():
                  "not_seen": [f"{ns}.SPC.Film_Reel"]}
     rows, ignored, not_seen = mapping.from_topic_map(topic_map, REG)
     assert len(rows) == len(mapping.required(REG)) and ignored == ["SPC.Feed"] and not_seen == []
-    sku = {"topic": f"{BASE}/SPC", "field": "SKU_Code"}
-    back, back_sku, problems = mapping.from_csv(mapping.to_csv(rows, sku))
-    assert problems == [] and back_sku == sku
-    assert mapping.digest(back, back_sku) == mapping.digest(rows, sku)
-    _, _, bad = mapping.from_csv("topic,tag\nx,y\n")
+    back, problems = mapping.from_csv(mapping.to_csv(rows))
+    assert problems == [] and mapping.digest(back) == mapping.digest(rows)
+    legacy = {"placeholder": "12345"}  # what a version saved before ADR-0027 may have recorded: it keeps its fingerprint
+    assert mapping.digest(rows, legacy) != mapping.digest(rows)
+    _, bad = mapping.from_csv("topic,tag\nx,y\n")
     assert bad[0]["line"] == 1

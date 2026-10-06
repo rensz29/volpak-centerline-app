@@ -195,9 +195,11 @@ def test_signing_out_ends_the_session_and_the_audit_log_names_who_changed_what(m
     c = make_client(roles=None)
     add_account(c.app, database, ["MANAGER"], username="lou")
     sign_in(c, "lou")
-    assert c.post("/api/v1/config/skus", json={"code": "S1", "name": "Sachet"}).status_code == 201
+    proposal = c.get("/api/v1/config/rules/proposal").json()
+    assert c.post("/api/v1/config/versions", json={"expectedLatest": None, "settings": proposal["settings"], "rules": proposal["rules"],
+                                                   "reason": "The Phase 0 proposal"}).status_code == 201
     entry = c.get("/api/v1/config/register").json()["audit"][0]
-    assert (entry["action"], entry["user"]) == ("sku.add", "lou")
+    assert (entry["action"], entry["user"]) == ("rules.version", "lou")
     r = c.post("/api/v1/auth/logout")
     assert r.status_code == 200 and 'centerline_session=""' in r.headers["set-cookie"]
     assert c.get("/api/v1/config/rules").status_code == 401

@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Loader2, Play, TriangleAlert } from 'lucide-react'
+import { ArrowLeftRight, Loader2, Play } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -175,16 +175,6 @@ export function AnalysisQueryPanel({
             onChange={(groupBy) => onChange({ groupBy, groupStats: groupBy === 'NONE' ? false : form.groupStats })}
           />
         </Field>
-        <Field label="SKU" error={errorFor('sku')}>
-          <Select value="ALL" disabled>
-            <SelectTrigger size="sm" aria-label="SKU" title={options.sku.reason ?? undefined}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All products</SelectItem>
-            </SelectContent>
-          </Select>
-        </Field>
       </div>
 
       <div className="border-line flex flex-wrap items-center justify-between gap-3 border-t px-4 py-3">
@@ -202,12 +192,6 @@ export function AnalysisQueryPanel({
             />
             Show statistics by group
           </label>
-          {!options.sku.available && (
-            <span className="text-ink-muted flex items-center gap-1.5 text-[12px]">
-              <TriangleAlert className="text-warning size-3.5" aria-hidden />
-              No SKU tag in Timebase yet: results cover every product
-            </span>
-          )}
         </div>
         <Button type="submit" size="sm" disabled={running || !form.x || !form.y || same}>
           {running ? (

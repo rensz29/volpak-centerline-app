@@ -11,6 +11,7 @@ from dataclasses import replace
 
 from centerline_common.channels import Email
 from centerline_common.historian import TimebaseClient, TimebaseError
+from centerline_common import isotime
 from fastapi import APIRouter, Depends, Request
 
 from ..auth.deps import ADMIN_ONLY, PRIVILEGED
@@ -154,7 +155,7 @@ def latest_values(body: TagsIn, request: Request) -> dict:
             for tag, pts in client.read(present[i:i + 20]).items():
                 p = pts[-1] if pts else None
                 out[tag[len(ns) + 1:]] = None if p is None else {
-                    "value": p.v, "quality": p.q, "at": p.t.isoformat().replace("+00:00", "Z")}
+                    "value": p.v, "quality": p.q, "at": isotime.iso(p.t)}
         return {"values": out, "missing": [t[len(ns) + 1:] for t in full if t not in known]}
     except TimebaseError as e:
         raise Problem(502, "historian-unavailable", "Timebase isn't answering", str(e)) from None
@@ -171,7 +172,6 @@ def _register_view(request: Request, conn) -> dict:
         "version": raw.get("version"),
         "namespace": raw["namespace"],
         "line": raw.get("line"),
-        "sku": raw.get("sku"),
         "parameters": [{"id": p["id"], "name": p["name"], "unit": p.get("unit"), "status": p.get("status"),
                         "note": p.get("note"), "review": p.get("tag_review") or p.get("hmi_match_review"),
                         "candidateTags": p.get("candidate_tags", []),

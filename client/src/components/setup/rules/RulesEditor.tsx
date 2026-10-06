@@ -1,15 +1,13 @@
 import {
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Clock,
   Gauge,
   Loader2,
   PauseCircle,
-  Plus,
   Save,
   SlidersHorizontal,
-  Tag,
+  Target,
   Trash2,
   TriangleAlert,
   Wand2,
@@ -28,6 +26,7 @@ import { configApi } from '@/services/configApi'
 import type {
   BriefChangeMode,
   LatestValue,
+  ReadinessGap,
   RegisterView,
   RuleDefaults,
   RuleField,
@@ -43,7 +42,6 @@ import { fromManilaInput, toUtcIso } from '@/utils/manilaTime'
 import { CheckRow, FormField } from '../FormParts'
 import { nextHourInput } from '../versionUtils'
 import { NumberField } from './NumberField'
-import { SkuDialog } from './RuleDialogs'
 import {
   BRIEF_LABELS,
   DELAY_FIELDS,
@@ -73,7 +71,7 @@ const INHERIT = '__inherit__'
 function placeholderFor(rules: RuleRow[], defaults: RuleDefaults, scope: Scope, field: RuleField, unit?: string | null) {
   const from = inherited(rules, defaults, scope, field)
   if (!from) return '—'
-  const where = from.from === 'default' ? 'default' : from.from === 'parameter' ? 'all zones' : from.from === 'sku' ? 'this SKU' : 'this zone'
+  const where = from.from === 'default' ? 'default' : from.from === 'parameter' ? 'all zones' : 'this zone'
   return `${formatValue(from.value, unit)} (${where})`
 }
 
@@ -85,7 +83,6 @@ export function RulesEditor({
   latest,
   onCancel,
   onSaved,
-  onOverview,
 }: {
   base: EditorBase
   overview: RulesOverview
@@ -93,7 +90,6 @@ export function RulesEditor({
   latest: Record<string, LatestValue | null>
   onCancel: () => void
   onSaved: (overview: RulesOverview) => void
-  onOverview: (overview: RulesOverview) => void
 }) {
   const [settings, setSettings] = useState<RulesSettings>(base.settings)
   const [rules, setRules] = useState<RuleRow[]>(base.rules)
@@ -104,14 +100,9 @@ export function RulesEditor({
   const [problem, setProblem] = useState<ApiProblem | null>(null)
   const [saving, setSaving] = useState(false)
   const [open, setOpen] = useState<Set<string>>(new Set())
-  const [skuCode, setSkuCode] = useState<string | null>(overview.skus[0]?.code ?? null)
-  const [skuOverrides, setSkuOverrides] = useState(false)
-  const [addingSku, setAddingSku] = useState(false)
 
   const params = useMemo(() => monitoredParameters(register), [register])
   const defaults = settings.defaults
-  const skus = overview.skus
-  const selectedSku = skus.find((s) => s.code === skuCode) ?? skus[0] ?? null
 
   const draft = (): RulesDraft => ({
     expectedLatest: overview.latest,
@@ -151,9 +142,7 @@ export function RulesEditor({
     setSettings((s) => ({ ...s, defaults: { ...s.defaults, [key]: value } }))
 
   const known = new Set(params.flatMap((p) => [`${p.id}|*`, ...p.zones.map((z) => `${p.id}|${z.id}`)]))
-  const stale = rules.filter(
-    (r) => !known.has(`${r.parameterId}|${r.zoneId ?? '*'}`) || (r.sku !== null && !skus.some((s) => s.code === r.sku)),
-  )
+  const stale = rules.filter((r) => !known.has(`${r.parameterId}|${r.zoneId ?? '*'}`))
 
   const save = async () => {
     setSaving(true)
@@ -177,7 +166,7 @@ export function RulesEditor({
         <NumberField
           value={valueOf(rules, scope, f) as number | null}
           onChange={(v) => update(scope, f, v)}
-          label={`${p.name}${scope.zoneId ? ` ${scope.zoneId}` : ''}${scope.sku ? ` SKU ${scope.sku}` : ''} ${FIELD_LABELS[f]}`}
+          label={`${p.name}${scope.zoneId ? ` ${scope.zoneId}` : ''} ${FIELD_LABELS[f]}`}
           placeholder={placeholderFor(rules, defaults, scope, f, p.unit)}
           unit={p.unit}
           min={0}
@@ -186,8 +175,6 @@ export function RulesEditor({
         {errorAt(scope, f) && <p className="text-critical mt-1 text-[11px] leading-snug">{errorAt(scope, f)}</p>}
       </td>
     ))
-
-  const readinessOf = (code: string) => check?.readiness[code]
 
   return (
     <div className="flex flex-col gap-4">
@@ -238,7 +225,7 @@ export function RulesEditor({
           </div>
         </SectionCard>
 
-        <SectionCard title="Defaults" description="For every parameter and SKU, unless set below" icon={Clock}>
+        <SectionCard title="Defaults" description="For every parameter, unless set below" icon={Clock}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {DELAY_FIELDS.map((f) => (
               <FormField key={f} label={FIELD_LABELS[f]} hint={DELAY_HELP[f]} error={problem?.forField(`settings.defaults.${f}`)}>
@@ -282,7 +269,7 @@ export function RulesEditor({
 
       <SectionCard
         title="Limits by parameter"
-        description="For every SKU. Distances from the HMI setpoint (A-02); Critical must be at least as far out as Warning."
+        description="Distances from the HMI setpoint (A-02); Critical must be at least as far out as Warning. The line is judged once every zone has all four."
         icon={Gauge}
         flush
       >
@@ -300,9 +287,11 @@ export function RulesEditor({
           </thead>
           <tbody>
             {params.map((p) => {
-              const scope: Scope = { sku: null, parameterId: p.id, zoneId: null }
+              const scope: Scope = { parameterId: p.id, zoneId: null }
               const expanded = open.has(p.id)
-              const overrides = rules.filter((r) => r.parameterId === p.id && r.sku === null && r.zoneId !== null).length
+              const overrides = rules.filter(
+                (r) => r.parameterId === p.id && r.zoneId !== null && LIMIT_FIELDS.some((f) => r[f] !== null),
+              ).length
               return (
                 <Fragment key={p.id}>
                   <tr className="border-line-soft border-b align-top">
@@ -397,7 +386,7 @@ export function RulesEditor({
                                 <td className="text-ink py-1.5 pr-3">
                                   {z.name} <span className="text-ink-muted font-mono text-[11px]">{z.id}</span>
                                 </td>
-                                {limitCells(p, { sku: null, parameterId: p.id, zoneId: z.id })}
+                                {limitCells(p, { parameterId: p.id, zoneId: z.id })}
                                 <td className="w-[150px]" />
                               </tr>
                             ))}
@@ -414,140 +403,39 @@ export function RulesEditor({
       </SectionCard>
 
       <SectionCard
-        title="SKUs and targets"
-        description="The target each zone should run at, per SKU (A-01). A SKU is monitored only once every zone has a target and limits."
-        icon={Tag}
-        actions={
-          <Button type="button" variant="outline" size="sm" onClick={() => setAddingSku(true)}>
-            <Plus className="size-3.5" aria-hidden /> Add SKU
-          </Button>
-        }
+        title="Targets by zone"
+        description="The value each zone's HMI setpoint should be at (A-01), from process engineering's centerline sheet. A zone without one has only its actual value judged."
+        icon={Target}
       >
-        {skus.length === 0 ? (
-          <p className="text-ink-soft text-[13px]">
-            No SKUs yet. Add the SKUs the line runs, with the codes the machine will publish (O-15), then enter their targets
-            from process engineering's centerline sheets.
-          </p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="SKU">
-              {skus.map((s) => {
-                const gaps = readinessOf(s.code)
-                return (
-                  <button
-                    key={s.code}
-                    type="button"
-                    role="tab"
-                    aria-selected={selectedSku?.code === s.code}
-                    onClick={() => setSkuCode(s.code)}
-                    className={cn(
-                      'border-line flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[13px]',
-                      selectedSku?.code === s.code ? 'bg-brand-surface border-brand/40 text-ink' : 'bg-surface text-ink-soft hover:bg-surface-muted',
-                    )}
-                  >
-                    {gaps === undefined ? null : gaps.length === 0 ? (
-                      <CheckCircle2 className="text-normal size-3.5" aria-label="ready" />
-                    ) : (
-                      <TriangleAlert className="text-warning size-3.5" aria-label={`${gaps.length} zones incomplete`} />
-                    )}
-                    <span className="font-mono">{s.code}</span>
-                    <span className="max-w-[180px] truncate">{s.name}</span>
-                  </button>
-                )
-              })}
-            </div>
-
-            {selectedSku && (
-              <SkuTargets
-                sku={selectedSku.code}
-                params={params}
-                rules={rules}
-                defaults={defaults}
-                latest={latest}
-                gaps={readinessOf(selectedSku.code)}
-                errorAt={errorAt}
-                update={update}
-                onFill={(filled) => setRules(filled)}
-              />
-            )}
-
-            {selectedSku && (
-              <div>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setSkuOverrides((o) => !o)} aria-expanded={skuOverrides}>
-                  {skuOverrides ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-                  Different limits or short-change handling for {selectedSku.code}
-                </Button>
-                {skuOverrides && (
-                  <table className="mt-1 w-full text-[13px]">
-                    <thead>
-                      <tr className="text-ink-muted border-line border-b text-left text-[11px] uppercase">
-                        <th className="px-3 py-2 font-semibold">Parameter</th>
-                        {LIMIT_FIELDS.map((f) => (
-                          <th key={f} className="w-[160px] px-2 py-2 font-semibold">
-                            {FIELD_LABELS[f]}
-                          </th>
-                        ))}
-                        <th className="w-[210px] px-2 py-2 font-semibold">{FIELD_LABELS.briefChangeMode}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {params.map((p) => {
-                        const scope: Scope = { sku: selectedSku.code, parameterId: p.id, zoneId: null }
-                        const mode = valueOf(rules, scope, 'briefChangeMode') as string | null
-                        const inheritedMode = inherited(rules, defaults, scope, 'briefChangeMode')
-                        return (
-                          <tr key={p.id} className="border-line-soft border-b align-top">
-                            <td className="px-3 py-2">{p.name}</td>
-                            {limitCells(p, scope)}
-                            <td className="px-2 py-1.5">
-                              <Select
-                                value={mode ?? INHERIT}
-                                onValueChange={(v) => update(scope, 'briefChangeMode', v === INHERIT ? null : (v as BriefChangeMode))}
-                              >
-                                <SelectTrigger size="sm" aria-label={`${p.name} short setpoint changes for ${selectedSku.code}`}>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value={INHERIT}>As every SKU ({formatValue(inheritedMode?.value)})</SelectItem>
-                                  {(Object.keys(BRIEF_LABELS) as BriefChangeMode[]).map((m) => (
-                                    <SelectItem key={m} value={m}>
-                                      {BRIEF_LABELS[m]}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        <ZoneTargets
+          params={params}
+          rules={rules}
+          defaults={defaults}
+          latest={latest}
+          gaps={check?.gaps}
+          errorAt={errorAt}
+          update={update}
+          onFill={(filled) => setRules(filled)}
+        />
       </SectionCard>
 
       {stale.length > 0 && (
         <SectionCard
           title="Rows the register no longer has"
-          description="Rules for zones, parameters or SKUs that aren't monitored any more. Remove them before saving."
+          description="Rules for zones or parameters that aren't monitored any more. Remove them before saving."
           icon={TriangleAlert}
         >
           <ul className="flex flex-col gap-1.5 text-[13px]">
             {stale.map((r) => (
-              <li key={`${r.sku}|${r.parameterId}|${r.zoneId}`} className="flex items-center justify-between gap-2">
+              <li key={`${r.parameterId}|${r.zoneId}`} className="flex items-center justify-between gap-2">
                 <span>
-                  {r.parameterId} · {r.zoneId ?? 'every zone'} · {r.sku ? `SKU ${r.sku}` : 'every SKU'}
+                  {r.parameterId} · {r.zoneId ?? 'every zone'}
                 </span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() =>
-                    setRules((list) => list.filter((x) => !(x.parameterId === r.parameterId && x.zoneId === r.zoneId && x.sku === r.sku)))
-                  }
+                  onClick={() => setRules((list) => list.filter((x) => !(x.parameterId === r.parameterId && x.zoneId === r.zoneId)))}
                 >
                   <Trash2 className="size-3.5" aria-hidden /> Remove
                 </Button>
@@ -630,24 +518,11 @@ export function RulesEditor({
         </div>
       </SectionCard>
 
-      {addingSku && (
-        <SkuDialog
-          sku={null}
-          onClose={() => setAddingSku(false)}
-          onSaved={(next) => {
-            onOverview(next)
-            setAddingSku(false)
-            const added = next.skus.find((s) => !skus.some((old) => old.code === s.code))
-            if (added) setSkuCode(added.code)
-          }}
-        />
-      )}
     </div>
   )
 }
 
-function SkuTargets({
-  sku,
+function ZoneTargets({
   params,
   rules,
   defaults,
@@ -657,12 +532,11 @@ function SkuTargets({
   update,
   onFill,
 }: {
-  sku: string
   params: MonitoredParameter[]
   rules: RuleRow[]
   defaults: RuleDefaults
   latest: Record<string, LatestValue | null>
-  gaps: { zoneId: string; parameterId: string; missing: RuleField[] }[] | undefined
+  gaps: ReadinessGap[] | undefined
   errorAt: (scope: Scope, field: RuleField) => string | undefined
   update: <F extends RuleField>(scope: Scope, field: F, value: RuleRow[F]) => void
   onFill: (rules: RuleRow[]) => void
@@ -677,7 +551,7 @@ function SkuTargets({
     let n = 0
     for (const p of params) {
       for (const z of p.zones) {
-        const scope: Scope = { sku, parameterId: p.id, zoneId: z.id }
+        const scope: Scope = { parameterId: p.id, zoneId: z.id }
         const value = hmi(z.setpoint)
         if (value !== null && valueOf(next, scope, 'target') === null && inherited(next, defaults, scope, 'target') === null) {
           next = setField(next, scope, 'target', value)
@@ -691,15 +565,21 @@ function SkuTargets({
     })
   }
 
+  const zones = (n: number) => `${n} zone${n === 1 ? '' : 's'}`
+  const noLimits = gaps?.filter((g) => g.missing.some((f) => f !== 'target')).length ?? 0
+  const noTarget = gaps?.filter((g) => g.missing.includes('target')).length ?? 0
+
   return (
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-ink-soft text-[12px]">
           {gaps === undefined
             ? 'Checking…'
-            : gaps.length === 0
-              ? `${sku} is ready: every zone has a target and limits.`
-              : `${sku}: ${gaps.length} zone${gaps.length === 1 ? '' : 's'} still need a target or limits. Monitoring pauses while it runs.`}
+            : noLimits > 0
+              ? `${zones(noLimits)} still lack limits: the line isn't judged until every zone has them.`
+              : noTarget > 0
+                ? `Every zone has its limits. ${zones(noTarget)} without a target: ${noTarget === 1 ? 'its' : 'their'} HMI setpoint isn't judged.`
+                : 'Every zone has a target and limits.'}
         </p>
         <Button type="button" variant="outline" size="sm" onClick={fill}>
           <Wand2 className="size-3.5" aria-hidden /> Fill empty targets from current HMI setpoints
@@ -710,13 +590,13 @@ function SkuTargets({
           <tr className="text-ink-muted border-line border-b text-left text-[11px] uppercase">
             <th className="px-3 py-2 font-semibold">Zone</th>
             <th className="w-[140px] px-2 py-2 text-right font-semibold">HMI setpoint now</th>
-            <th className="w-[200px] px-2 py-2 font-semibold">Target for {sku}</th>
+            <th className="w-[200px] px-2 py-2 font-semibold">Target</th>
             <th className="px-2 py-2 font-semibold" />
           </tr>
         </thead>
         <tbody>
           {params.map((p) => {
-            const all: Scope = { sku, parameterId: p.id, zoneId: null }
+            const all: Scope = { parameterId: p.id, zoneId: null }
             return (
               <Fragment key={p.id}>
                 <tr className="bg-surface-muted/50 border-line-soft border-b">
@@ -728,7 +608,7 @@ function SkuTargets({
                     <NumberField
                       value={valueOf(rules, all, 'target') as number | null}
                       onChange={(v) => update(all, 'target', v)}
-                      label={`${p.name} target for every zone, SKU ${sku}`}
+                      label={`${p.name} target for every zone`}
                       placeholder="Same for every zone"
                       unit={p.unit}
                       invalid={Boolean(errorAt(all, 'target'))}
@@ -737,7 +617,7 @@ function SkuTargets({
                   <td className="text-ink-muted px-2 py-1.5 text-[11px]">optional: one target for all its zones</td>
                 </tr>
                 {p.zones.map((z) => {
-                  const scope: Scope = { sku, parameterId: p.id, zoneId: z.id }
+                  const scope: Scope = { parameterId: p.id, zoneId: z.id }
                   const gap = gaps?.find((g) => g.parameterId === p.id && g.zoneId === z.id)
                   const now = hmi(z.setpoint)
                   return (
@@ -752,20 +632,20 @@ function SkuTargets({
                         <NumberField
                           value={valueOf(rules, scope, 'target') as number | null}
                           onChange={(v) => update(scope, 'target', v)}
-                          label={`${z.name} target, SKU ${sku}`}
+                          label={`${z.name} target`}
                           placeholder={placeholderFor(rules, defaults, scope, 'target', p.unit)}
                           unit={p.unit}
                           invalid={Boolean(errorAt(scope, 'target'))}
                         />
                       </td>
                       <td className="px-2 py-1.5 text-[11px]">
-                        {gap ? (
+                        {gap && gap.missing.some((f) => f !== 'target') ? (
                           <span className="text-warning inline-flex items-center gap-1">
                             <TriangleAlert className="size-3" aria-hidden />
-                            no {gap.missing.includes('target') ? 'target' : ''}
-                            {gap.missing.includes('target') && gap.missing.length > 1 ? ' or ' : ''}
-                            {gap.missing.some((f) => f !== 'target') ? 'limits' : ''}
+                            no {gap.missing.includes('target') ? 'target or ' : ''}limits
                           </span>
+                        ) : gap ? (
+                          <span className="text-ink-muted">no target: HMI setpoint not judged</span>
                         ) : gaps ? (
                           <span className="text-normal inline-flex items-center gap-1">
                             <SlidersHorizontal className="size-3" aria-hidden /> set

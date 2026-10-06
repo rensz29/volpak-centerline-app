@@ -19,18 +19,19 @@ UPDATE = ADD_READ | {"UPDATE"}
 EXPECTED = {
     "schema_migration": {"SELECT"},
     # evidence and versions: added and read, never changed (DAT-01)
-    **{t: ADD_READ for t in ("audit_log", "register_version", "config_version", "sku_parameter_rule", "mapping_version",
+    **{t: ADD_READ for t in ("audit_log", "register_version", "config_version", "parameter_rule", "mapping_version",
                              "tag_mapping", "event", "event_transition", "lightweight_change", "event_acknowledgment",
                              "notification", "app_user_password", "monitoring_switch", "routing_version", "notification_route",
-                             "delivery_attempt", "shift_instance", "workflow_entry", "workflow_settings")},
+                             "delivery_attempt", "shift_instance", "workflow_entry", "workflow_settings", "analytics_range_version",
+                             "analytics_range")},
     # also updated: activations (the triggers allow only cancelling) and the operational rows
     **{t: UPDATE for t in ("config_activation", "mapping_activation", "event_state", "scheduled_action", "pause_period",
                            "monitor_heartbeat", "app_user", "maintenance_window", "routing_activation", "notification_delivery",
-                           "notifier_heartbeat", "workflow_request")},
-    # also deleted: unused SKUs, ended sessions, an account's sign-in names (rewritten by their trigger)
-    "sku": UPDATE | {"DELETE"},
+                           "notifier_heartbeat", "workflow_request", "analytics_range_activation")},
+    # also deleted: ended sessions, an account's sign-in names (rewritten by their trigger), idempotency keys past 24 h
     "app_session": UPDATE | {"DELETE"},
     "app_user_login": ADD_READ | {"DELETE"},
+    "idempotency_key": UPDATE | {"DELETE"},
 }
 PRIVILEGES = ("SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
 

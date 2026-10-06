@@ -450,7 +450,7 @@ def _parse_blocks(payload: Any) -> dict[str, list[Sample]]:
         name = (block.get("t") or {}).get("n")
         if name is None:
             continue
-        # Values pass through untouched: SKU codes such as "00123" must stay strings.
+        # Values pass through untouched: codes such as "00123" must stay strings.
         out[name] = [Sample(parse_ts(p["t"]), p.get("v"), int(p.get("q", 0)))
                      for p in block.get("d") or [] if "t" in p]
     return out

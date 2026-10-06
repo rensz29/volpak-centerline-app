@@ -62,7 +62,7 @@ together — there is no denormalised copy that can drift out of step.
 | `/maintenance` | **Live, Manager and Administrator.** Maintenance windows in force, coming and past; Administrators open them for the line or chosen zones, move their end, end them |
 | `/notifications` | **Live, Manager and Administrator.** Every message to Teams and email: how it was routed, each delivery's status and attempts, what was sent; Administrators send TEST messages and re-drive failures ([ADR-0023](../docs/decisions/ADR-0023-notifier.md)) |
 | `/accounts` | **Live, Administrator.** Every account with its roles and state; create one, change its roles or disable it, issue a temporary password |
-| `/configuration` | **Live, Manager and Administrator** (the Rules tab is the Manager's to change, the others the Administrator's). Connections: the MQTT broker and the Timebase historian, with Test and Save. Tags: the parameter register (parameters, zones, Timebase tags with their latest values) and its change history. Mappings: each tag's topic and field. Rules: SKUs, targets, limits and delays as versions. Notifications: who gets which messages, as versions; the Teams flow and the SMTP relay are on Connections. Reasons: the follow-up questions |
+| `/configuration` | **Live, Manager and Administrator** (the Rules tab is the Manager's to change, the others the Administrator's). Connections: the MQTT broker and the Timebase historian, with Test and Save. Tags: the parameter register (parameters, zones, Timebase tags with their latest values) and its change history. Mappings: each tag's topic and field. Rules: each zone's target, limits and delays as versions. Notifications: who gets which messages, as versions; the Teams flow and the SMTP relay are on Connections. Reasons: the follow-up questions. Analytics ranges: what each parameter's values must lie within to count in Analytics, as versions |
 
 ---
 
@@ -187,7 +187,7 @@ icon and a written label.
 monitor-core ([services/monitor_core](../services/monitor_core/README.md)) judged. It
 refreshes every 2 s while the tab is visible:
 
-- **The banner** says whether it's judging, under which SKU and versions, or why not:
+- **The banner** says whether it's judging, under which versions, or why not:
   - a paused snapshot gate, with the reasons;
   - Actual rules paused while the machine is stopped or warming up;
   - monitor-core not running, or its heartbeat late;
@@ -247,7 +247,10 @@ any case.
 The user menu shows the account and its roles, changes the password and signs out.
 Signing out on purpose returns to the Digital Centerline page for the next person.
 `src/context/AuthContext.tsx` holds the session. `src/services/http.ts` adds the CSRF
-header and signs the page out when the api answers 401.
+header and signs the page out when the api answers 401. It also gives every POST a new
+`Idempotency-Key`, and sends a POST whose answer was lost once more with the same key, so
+the api answers it again instead of saving it twice
+([ADR-0028](../docs/decisions/ADR-0028-polling-idempotency-g2-acceptance.md)).
 
 ## Configuration: live
 
@@ -261,7 +264,7 @@ header and signs the page out when the api answers 401.
   - notifications: Centerline's address for the links, the Teams flow's URL, the SMTP relay.
 
   **Test** tries the form without saving anything. For MQTT it listens up to 30 s and
-  shows the topics, which register tags it found and any SKU-like field. **Save** takes
+  shows the topics and which register tags it found. **Save** takes
   an optional reason, kept in the change history. Passwords, tokens and certificates
   are write-only: the page shows "Saved · not shown" and never gets them back.
 - **Tags (`?tab=tags`):** every URS parameter with its zones and tags, and each tag's
@@ -284,7 +287,8 @@ header and signs the page out when the api answers 401.
   mapping with a place for every tag can be activated.
 - **Rules (`?tab=rules`):** the monitoring rules, as numbered versions. The tab shows:
   - the version in effect and any scheduled switch;
-  - the SKU list, with each SKU's readiness;
+  - what the version in effect leaves unjudged: zones without limits (the line isn't
+    judged) and zones without a target (their HMI setpoint isn't);
   - every version, with **View**, **Edit as new** and **Activate** or **Roll back to**.
 
   The editor starts from the newest version, or from the Phase 0 proposal for the first
@@ -292,8 +296,9 @@ header and signs the page out when the api answers 401.
   - the stop pause;
   - default delays;
   - Warning and Critical limits per parameter, with delay and zone overrides;
-  - each SKU's target per zone. **Fill empty targets from current HMI setpoints** is a
-    starting point to check against the centerline sheet.
+  - each zone's target ([ADR-0027](../docs/decisions/ADR-0027-no-sku.md)). **Fill empty
+    targets from current HMI setpoints** is a starting point to check against the
+    centerline sheet. A zone without a target has only its actual value judged.
 
   A blank field shows what it inherits. The api checks the draft as you type and shows
   problems next to the field. Saving needs a reason, and can activate now, at a set
@@ -306,6 +311,10 @@ header and signs the page out when the api answers 401.
   activated (ACT-03).
 - **Reasons (`?tab=workflow`):** the follow-up questions every reason gets, at most two
   ([ADR-0025](../docs/decisions/ADR-0025-shifts-and-reasons.md)). An Administrator changes them with a reason; every change is kept.
+- **Analytics ranges (`?tab=ranges`):** the Analytics-valid range of each parameter
+  ([ADR-0029](../docs/decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)). An Administrator downloads the
+  template, has it filled in, and uploads it. The file is checked as a whole before it can be saved with a reason, and
+  is kept exactly as uploaded. Versions are activated now or later, or rolled back, like the rules.
 
 Managers and Administrators see every tab. A tab the account can't change says so, and
 shows no editing buttons: the Rules tab is the Manager's, the others are the Administrator's

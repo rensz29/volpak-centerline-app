@@ -15,14 +15,12 @@ own with the SDD rules, then rolled up per parameter and for the line:
 * Actual severity (ACT-01, A-02): only with --limits, because limits are
   offsets around the setpoint that live in configuration, not in Timebase.
   Without limits the report still gives the |actual − setpoint| spread.
-* Runs: while the SKU tag isn't published (ADR-0007), every shift
-  (06:00 / 14:00 / 22:00 Manila) is a run and its target is inferred as the
-  value held longest. Once the SKU tag exists, runs follow the SKU and the
-  changeover analysis for ADR-0001 appears.
+* Runs: every shift (06:00 / 14:00 / 22:00 Manila) is a run, and without
+  targets.csv its target is inferred as the value held longest.
 
-targets.csv: sku,parameter_id,zone_id,target   sku and zone_id may be '*'
-limits.csv:  sku,parameter_id,zone_id,warn_low,warn_high,crit_low,crit_high
-             offsets from the setpoint, all positive; sku and zone_id may be '*'
+targets.csv: parameter_id,zone_id,target   zone_id may be '*'
+limits.csv:  parameter_id,zone_id,warn_low,warn_high,crit_low,crit_high
+             offsets from the setpoint, all positive; zone_id may be '*'
 
 Series are sample-and-hold. A sample below good_quality_min, a non-numeric
 value, or a span the server couldn't return (gaps.csv) is unknown. A dwell that
@@ -36,7 +34,6 @@ import argparse
 import csv
 import json
 import math
-import statistics
 from bisect import bisect_right
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -64,7 +61,6 @@ class Dwell:
     start: float
     length: float
     ended_by: str  # 'target' | 'other' | 'censored'
-    changeover: bool = False  # setpoint not yet dialled to the new SKU's target
 
 
 # -- loading -----------------------------------------------------------------
@@ -130,8 +126,8 @@ def clip(segs: list[Seg], lo: float, hi: float) -> list[Seg]:
     return out
 
 
-def _lookup(table: dict, sku: str, pid: str, zid: str):
-    for key in ((sku, pid, zid), (sku, pid, "*"), ("*", pid, zid), ("*", pid, "*")):
+def _lookup(table: dict, pid: str, zid: str):
+    for key in ((pid, zid), (pid, "*")):
         if key in table:
             return table[key]
     return None
@@ -141,7 +137,7 @@ def load_targets(path: str | None) -> dict:
     if not path:
         return {}
     with open(path, encoding="utf-8") as f:
-        return {(r["sku"].strip(), r["parameter_id"].strip(), (r.get("zone_id") or "*").strip()): float(r["target"])
+        return {(r["parameter_id"].strip(), (r.get("zone_id") or "*").strip()): float(r["target"])
                 for r in csv.DictReader(f)}
 
 
@@ -154,7 +150,7 @@ def load_limits(path: str | None) -> dict:
             vals = tuple(abs(float(r[k])) for k in ("warn_low", "warn_high", "crit_low", "crit_high"))
             if vals[2] < vals[0] or vals[3] < vals[1]:
                 raise SystemExit(f"limits for {r['parameter_id']}: Critical offset must be ≥ Warning offset")
-            out[(r["sku"].strip(), r["parameter_id"].strip(), (r.get("zone_id") or "*").strip())] = vals
+            out[(r["parameter_id"].strip(), (r.get("zone_id") or "*").strip())] = vals
     return out
 
 
@@ -205,18 +201,16 @@ def inferred_target(sp: list[Seg], key) -> int | None:
     return held.most_common(1)[0][0] if held else None
 
 
-def hmi_dwells(sp: list[Seg], target: int, key, after_change: bool) -> list[Dwell]:
+def hmi_dwells(sp: list[Seg], target: int, key) -> list[Dwell]:
     """Dwells at one off-target value; a new off-target value restarts the delay (HMI-03)."""
     states = merge([Seg(s.a, s.b, None if s.v is None else key(s.v)) for s in sp])
-    dwells, settling = [], after_change
+    dwells = []
     for i, s in enumerate(states):
-        if s.v == target:
-            settling = False
         if s.v is None or s.v == target:
             continue
         nxt = states[i + 1] if i + 1 < len(states) else None
         ended = "censored" if nxt is None or nxt.v is None else ("target" if nxt.v == target else "other")
-        dwells.append(Dwell(s.a, s.b - s.a, ended, changeover=settling))
+        dwells.append(Dwell(s.a, s.b - s.a, ended))
     return dwells
 
 
@@ -347,7 +341,7 @@ def suggest(dwells: list[Dwell]) -> str:
     dwells are then the quick transients the delay should absorb; what's left
     are deliberate setpoint changes, which monitoring is meant to catch.
     """
-    drift = [w.length for w in dwells if not w.changeover]
+    drift = [w.length for w in dwells]
     if len(drift) < 20:
         return f"– (only {len(drift)} off-target dwells; need ≥ 20)"
     events = [sum(x >= d for x in drift) for d in CANDIDATES_S]
@@ -357,17 +351,11 @@ def suggest(dwells: list[Dwell]) -> str:
     return f"**≥ {CANDIDATES_S[-1]} s** (events keep falling with longer delays)"
 
 
-def candidate_table(dwells: list[Dwell], days: float, with_changeover: bool) -> list[str]:
-    head = "| Mismatch delay | Events / day | Brief changes / day |" + (" Extra events / day at changeover |" if with_changeover else "")
-    rows = [head, "|---" * (4 if with_changeover else 3) + "|"]
-    drift = [w for w in dwells if not w.changeover]
-    change = [w for w in dwells if w.changeover]
+def candidate_table(dwells: list[Dwell], days: float) -> list[str]:
+    rows = ["| Mismatch delay | Events / day | Brief changes / day |", "|---|---|---|"]
     for d in CANDIDATES_S:
-        raised = sum(w.length >= d for w in drift)
-        row = f"| {d} s | {raised / days:.1f} | {(len(drift) - raised) / days:.1f} |"
-        if with_changeover:
-            row += f" {sum(w.length >= d for w in change) / days:.1f} |"
-        rows.append(row)
+        raised = sum(w.length >= d for w in dwells)
+        rows.append(f"| {d} s | {raised / days:.1f} | {(len(dwells) - raised) / days:.1f} |")
     return rows
 
 
@@ -398,9 +386,7 @@ def main() -> int:
     gaps = load_gaps()
     fetched = set(manifest["tags"])
 
-    sku_mode = reg.sku_tag is not None and reg.sku_tag in fetched
-    runs = ([r for r in to_segments(load_series(reg.sku_tag, good, numeric=False), lo, hi) if r.v is not None]
-            if sku_mode else shift_runs(lo, hi))
+    runs = shift_runs(lo, hi)
     days = max(sum(r.b - r.a for r in runs) / 86400, 1e-9)
     run_tag = reg.context.get("machine_run")
     run_segs = to_segments(load_series(run_tag, good, numeric=True), lo, hi) if run_tag in fetched else []
@@ -410,8 +396,6 @@ def main() -> int:
     # pid -> list of (zone, hmi dwells, ≥Warning excursions, Critical excursions, |actual−sp| spread, setpoint changes)
     per_param: dict[str, list] = defaultdict(list)
     skipped: list[str] = []
-    settle: list[float] = []
-    changeover_off: Counter = Counter()
 
     for z in reg.zones:
         if z.setpoint not in fetched or z.actual not in fetched:
@@ -425,24 +409,16 @@ def main() -> int:
             act_all = keep_only(act_all, active)
         sp_changes = sum(1 for t, _ in sp_pts if lo <= t < hi)
         dwells, sev_w, sev_c, dev = [], [], [], []
-        for k, run in enumerate(runs):
+        for run in runs:
             sp = clip(sp_all, run.a, run.b)
-            sku = str(run.v) if sku_mode else "*"
-            raw_target = _lookup(targets, sku, z.parameter_id, z.zone_id)
+            raw_target = _lookup(targets, z.parameter_id, z.zone_id)
             target = key(raw_target) if raw_target is not None else inferred_target(sp, key)
             if target is None:
                 continue
-            dwells += hmi_dwells(sp, target, key, after_change=sku_mode and k > 0)
-            if sku_mode and k > 0:
-                first = next((s.v for s in sp if s.v is not None), None)
-                if first is not None and key(first) != target:
-                    changeover_off[run.a] += 1
-                ok = next((s.a for s in sp if s.v is not None and key(s.v) == target), None)
-                if ok is not None:
-                    settle.append(ok - run.a)
+            dwells += hmi_dwells(sp, target, key)
             joined = join(clip(act_all, run.a, run.b), sp)
             dev += [(abs(x - h), b - a) for a, b, x, h in joined if x is not None and h is not None]
-            off = _lookup(limits, sku, z.parameter_id, z.zone_id)
+            off = _lookup(limits, z.parameter_id, z.zone_id)
             if off:
                 w, c = severity_dwells(joined, off)
                 sev_w += w
@@ -458,9 +434,7 @@ def main() -> int:
          f"- Range: {manifest['from']} → {manifest['to']} (UTC, Timebase clock); "
          f"analysed up to {datetime.fromtimestamp(hi, timezone.utc):%Y-%m-%d %H:%M} UTC",
          f"- Register version {reg.version}: {sum(len(r) for r in per_param.values())} zones in {len(per_param)} active parameters",
-         ("- Runs follow the SKU tag" if sku_mode else
-          "- **No SKU tag yet (ADR-0007):** each shift is a run and its target is inferred as the setpoint "
-          "held longest in that shift. Changeover analysis needs the SKU tag."),
+         "- Each shift is a run; without targets.csv its target is the setpoint held longest in that shift.",
          f"- Targets: {'targets.csv' if targets else 'inferred per run'} · "
          f"Actual limits: {'limits.csv' if limits else 'not given, so severity analysis is skipped'}",
          "- Events / day count every dwell long enough to trigger, including censored ones; "
@@ -474,7 +448,7 @@ def main() -> int:
               f"a day (a live value, not an operator setting): {', '.join(sorted(live))}. "
               "Their own tables are below.", ""]
     L += [
-          *candidate_table(all_dwells, days, sku_mode), "",
+          *candidate_table(all_dwells, days), "",
           "CAP-01 budget: 1,000 events and 10,000 lightweight changes per day for the whole line.", "",
           "| Parameter | Zones | HMI rule | Off-target dwells / day | Setpoint changes / day | Suggested delay | Flags |",
           "|---|---|---|---|---|---|---|"]
@@ -486,7 +460,7 @@ def main() -> int:
         if names[pid].get("hmi_match_review"):
             flags.append("HMI rule under review (O-17)")
         L.append(f"| {pid} {names[pid]['name']} | {len(rows)} | {rows[0][0].hmi_match.describe()} | "
-                 f"{sum(not w.changeover for w in dw) / days:.1f} | {sum(r[5] for r in rows) / days:.1f} | "
+                 f"{len(dw) / days:.1f} | {sum(r[5] for r in rows) / days:.1f} | "
                  f"{suggest(dw)} | {'; '.join(flags) or '–'} |")
     L.append("")
 
@@ -516,15 +490,6 @@ def main() -> int:
                      f"{run_n / days:.1f} | {(len(crit) - run_n) / days:.1f} |")
         L.append("")
 
-    if sku_mode:
-        n = max(len(runs) - 1, 0)
-        L += ["### SKU changeovers (ADR-0001)", "",
-              f"- Changeovers: {n} ({n / days:.2f} per day)",
-              f"- Changeovers with ≥ 1 zone off the new SKU's target at the change: {len(changeover_off)}"
-              f" (median {statistics.median(changeover_off.values()) if changeover_off else 0:g} zones each)",
-              f"- Time until each zone first matched the new target: "
-              f"p50 {fmt_s(pct(settle, .5))} · p90 {fmt_s(pct(settle, .9))}", ""]
-
     if gaps or skipped or manifest.get("missing_tags"):
         L += ["### Data quality", ""]
         for t, secs in sorted(gaps.items(), key=lambda kv: -kv[1]):
@@ -549,7 +514,7 @@ def main() -> int:
                      f"{sum(w.ended_by == 'target' for w in d)} · {sum(w.ended_by == 'other' for w in d)} · "
                      f"{sum(w.ended_by == 'censored' for w in d)} | {fmt_s(pct(done, .5))} | {fmt_s(pct(done, .9))} | "
                      f"{suggest(d)} | {spread} |")
-        L += ["", f"All {p['name']} zones together:", "", *candidate_table(dw, days, sku_mode), ""]
+        L += ["", f"All {p['name']} zones together:", "", *candidate_table(dw, days), ""]
         if limits:
             sw = [w for r in rows for w in r[2]]
             sc = [c for r in rows for c in r[3]]

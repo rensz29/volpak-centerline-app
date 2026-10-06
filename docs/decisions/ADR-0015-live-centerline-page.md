@@ -1,7 +1,8 @@
 # ADR-0015: The live Digital Centerline page
 
 - **Status:** Accepted. Decision 5 amended by [ADR-0016](ADR-0016-accounts-sign-in-and-roles.md): with login, a
-  Manager acknowledges a Critical from the event's sheet
+  Manager acknowledges a Critical from the event's sheet. Amended by [ADR-0028](ADR-0028-polling-idempotency-g2-acceptance.md) (2026-10-06): the page keeps polling;
+  there's no WebSocket for one line
 - **Date:** 2026-09-30
 - **Decider:** Szyrelle (system owner)
 - **Related:** [ADR-0014](ADR-0014-monitor-core.md) (monitor-core), [ADR-0012](ADR-0012-rules-configuration-postgresql.md)

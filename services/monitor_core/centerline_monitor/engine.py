@@ -15,10 +15,12 @@ import math
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
+from centerline_common.isotime import iso
+
 from .config import EngineConfig
 from .effects import (CancelTimer, Notify, OpenEvent, PauseEnded, PauseStarted, StartTimer, TimerDone, Transition,
                       ZoneRef)
-from .gate import Gate, GateInputs
+from .gate import RULES_INCOMPLETE, Gate, GateInputs
 from .machines import ActualMachine, HmiMachine, ZoneRule, text
 from .rules import decimal
 from .stoppause import StopPause
@@ -38,7 +40,7 @@ def number(raw) -> float | None:
 
 def _window(w: dict) -> dict:
     return {"window": str(w["id"]), "scope": w["scope"], "reason": w["reason"],
-            "plannedStart": w["planned_start"].isoformat(), "plannedEnd": w["planned_end"].isoformat()}
+            "plannedStart": iso(w["planned_start"]), "plannedEnd": iso(w["planned_end"])}
 
 
 SKEW_WARN_S = 5  # payload clock this far from ours: a warning on the health view (guide §6.1)
@@ -55,9 +57,6 @@ class Engine:
         self.last_live: dict[str, datetime] = {}
         self.values: dict[str, float | None] = {}
         self.source_ts: dict[str, tuple[datetime, datetime]] = {}  # topic → (the payload's _timestamp, when it arrived)
-        self.sku_value: str | None = None
-        self.sku: str | None = None  # the SKU the machines are judging under
-        self.placeholder: str | None = None  # the mapping's placeholder SKU, standing in for the field (ADR-0022)
         self.timers: dict[str, tuple[datetime, str, str]] = {}  # key → (due, kind, channel)
         self.hmi: dict[str, HmiMachine] = {}
         self.actual: dict[str, ActualMachine] = {}
@@ -65,7 +64,7 @@ class Engine:
         self.actual_paused = False
         self.gate: Gate | None = None
         self.reasons: list[str] = ["Starting: waiting for a complete, fresh snapshot"]
-        self.sku_alerted = False
+        self.rules_alerted = False  # Management told the rules are incomplete, once per pause (OPC-08)
         self.labels: dict = {}  # open event → "Actual on P06.N2 Nozzle 2", for the log
         self.zone_of: dict = {}  # open event → its zone, for the payload clock in its evidence
         self.arrived: dict[str, datetime] = {}  # tag → when its latest value arrived (our clock)
@@ -96,14 +95,8 @@ class Engine:
             if tag in cfg.mapping:
                 topic, field = cfg.mapping[tag]
                 self.by_topic.setdefault(topic, []).append((tag, field))
-        placeholder = cfg.sku_placeholder if cfg.sku_place is None else None
-        if placeholder != self.placeholder:
-            if placeholder is None and cfg.sku_place is not None:
-                self.last_live.pop(cfg.sku_place[0], None)  # the SKU now comes from the machine: wait for its next message
-            self.sku_value, self.placeholder = placeholder, placeholder
         previous = self.gate
-        self.gate = Gate(cfg.topic_freshness(), cfg.needed_tags(), cfg.sku_place[0] if cfg.sku_place else None,
-                         cfg.sku_ready, cfg.blockers(), placeholder)
+        self.gate = Gate(cfg.topic_freshness(), cfg.needed_tags(), cfg.ready, cfg.blockers())
         if previous is not None:
             self.gate.open, self.gate.closed_since = previous.open, previous.closed_since
         pause = (cfg.settings or {}).get("pause_when_stopped") or {}
@@ -136,8 +129,7 @@ class Engine:
         if retained:
             return  # never counts as fresh (guide §6.2)
         places = self.by_topic.get(topic, [])
-        sku_here = self.cfg.sku_place is not None and self.cfg.sku_place[0] == topic
-        if not places and not sku_here:
+        if not places:
             return  # not a mapped topic (DFOS, for instance)
         try:
             obj = json.loads(payload)
@@ -154,9 +146,6 @@ class Engine:
         for tag, field in places:
             self.values[tag] = number(obj if field is None else fields.get(field))
             self.arrived[tag] = now
-        if sku_here:
-            raw = fields.get(self.cfg.sku_place[1])
-            self.sku_value = str(raw).strip() if raw not in (None, "") else None
         self._check(now, touched=topic)
 
     def acknowledge(self, ack: dict, now: datetime) -> None:
@@ -214,7 +203,7 @@ class Engine:
                 self.overdue_sent.add(w["id"])
                 fx.append(Notify(f"maintenance:{w['id']}:overdue", "system", now, {
                     "kind": "Maintenance overdue (MNT-01)", "window": str(w["id"]), "scope": w["scope"],
-                    "zones": list(w["channels"]), "reason": w["reason"], "plannedEnd": w["planned_end"].isoformat()}))
+                    "zones": list(w["channels"]), "reason": w["reason"], "plannedEnd": iso(w["planned_end"])}))
                 log.info("maintenance overdue: %s (planned to end %s)", w["reason"], w["planned_end"].isoformat())
         self._apply(fx, now)
         if ended_line and not self.gate.open:
@@ -259,10 +248,10 @@ class Engine:
     # -- the step -----------------------------------------------------------------------
 
     def _inputs(self) -> GateInputs:
-        return GateInputs(self.connected, self.last_live, self.values, self.sku_value)
+        return GateInputs(self.connected, self.last_live, self.values)
 
     def _rule(self, ch: str) -> ZoneRule | None:
-        return self.cfg.zone_rule(self.zones[ch], self.sku) if self.sku and ch in self.zones else None
+        return self.cfg.zone_rule(self.zones[ch]) if ch in self.zones else None
 
     def _check(self, now: datetime, touched: str | None = None, judge: bool = True) -> None:
         """Open or close the gate; judge the zones touched by new values, or all of them on a fresh snapshot."""
@@ -274,18 +263,14 @@ class Engine:
             w = self.line_window
             end = w["planned_end"].astimezone(MANILA).strftime("%H:%M")
             reasons.insert(0, f"Maintenance: {w['reason']} (planned to end {end} Manila)")
-        if not reasons and self.gate.open and self.sku is not None and self.sku_value != self.sku:
-            fx += self._changeover(now)
-            reasons = [f"SKU changed from {self.sku} to {self.sku_value}: waiting for a fresh snapshot"]
-            self.sku = self.sku_value
         if reasons:
             if self.gate.open:
                 fx += self._close(now, reasons)
+            # OPC-08 as ADR-0027 amends it: alert Management once when the data is complete but the rules aren't
+            if reasons == [RULES_INCOMPLETE] and not self.rules_alerted:
+                self.rules_alerted = True
+                fx.append(Notify(f"rules:{now.isoformat()}", "system", now, {"reasons": reasons, "kind": "Rules incomplete (OPC-08)"}))
             self.reasons = reasons
-            # OPC-08: alert Management once when the data is complete but the SKU is missing or unconfigured
-            if not self.sku_alerted and all("SKU" in r and "changed from" not in r for r in reasons):
-                self.sku_alerted = True
-                fx.append(Notify(f"sku:{now.isoformat()}", "system", now, {"reasons": reasons, "kind": "SKU unavailable (OPC-08)"}))
         else:
             if not self.gate.open:
                 fx += self._open(now)
@@ -303,23 +288,13 @@ class Engine:
         return fx
 
     def _open(self, now: datetime) -> list:
-        self.gate.open, self.reasons, self.sku_alerted = True, [], False
-        if self.sku is None:
-            self.sku = self.sku_value
+        self.gate.open, self.reasons, self.rules_alerted = True, [], False
         fx: list = [PauseEnded("line", now)]
         if not self.actual_paused:
             for ch, m in self.actual.items():
                 if self._judged(ch):
                     fx += m.resume(now)
-        log.info("judging under SKU %s", self.sku)
-        return fx
-
-    def _changeover(self, now: datetime) -> list:
-        """A different configured SKU (ADR-0001): close open events without recovery notices, tell Management once."""
-        fx: list = []
-        for m in [*self.hmi.values(), *self.actual.values()]:
-            fx += m.changeover(now)
-        fx.append(Notify(f"changeover:{now.isoformat()}", "changeover", now, {"from": self.sku, "to": self.sku_value}))
+        log.info("judging by rules v%s", self.cfg.rules_number)
         return fx
 
     def _evaluate(self, now: datetime, touched: str | None) -> list:
@@ -341,7 +316,7 @@ class Engine:
                 del self.waiting[ch]
                 if not self.actual_paused:
                     fx += self.actual[ch].resume(now)
-            if rule.target is not None:  # a placeholder SKU's zone without a target isn't judged on HMI (ADR-0022)
+            if rule.target is not None:  # a zone without a target isn't judged on HMI (ADR-0027)
                 fx += self.hmi[ch].evaluate(now, self.values[sp], rule)
             if not self.actual_paused:
                 fx += self.actual[ch].evaluate(now, self.values[act], self.values[sp], rule)
@@ -401,7 +376,7 @@ class Engine:
         for tag in (z.setpoint, z.actual) if z else ():
             place = self.cfg.mapping.get(self.cfg.rel(tag)) if tag else None
             if place and place[0] in self.source_ts:
-                out[place[0]] = self.source_ts[place[0]][0].isoformat()
+                out[place[0]] = iso(self.source_ts[place[0]][0])
         return out
 
     def clock_skew(self) -> dict:
@@ -426,13 +401,13 @@ class Engine:
         """Why a zone isn't judged right now, if it isn't (ADR-0017)."""
         if ch in self.switched_off:
             s = self.switched_off[ch]
-            return {"state": "off", "since": s["at"].isoformat(), "by": s["by_user"], "reason": s["reason"]}
+            return {"state": "off", "since": iso(s["at"]), "by": s["by_user"], "reason": s["reason"]}
         if ch in self.held:
             return {"state": "maintenance", **_window(self.held[ch])}
         if self.line_window is not None:
             return {"state": "maintenance", **_window(self.line_window)}
         if ch in self.waiting:
-            return {"state": "waiting", "since": self.waiting[ch].isoformat()}
+            return {"state": "waiting", "since": iso(self.waiting[ch])}
         return None
 
     def status(self) -> dict:
@@ -445,14 +420,14 @@ class Engine:
             # Each check shows the rule it judges by: an open event's pinned rule wins (OPC-07)
             hmi_rule, actual_rule = h.rule or current, a.rule or current
             limits = actual_rule.limits if actual_rule else None
-            due = lambda key: self.timers[key][0].isoformat() if key in self.timers else None  # noqa: E731
+            due = lambda key: iso(self.timers[key][0]) if key in self.timers else None  # noqa: E731
             zones[ch] = {"setpoint": text(sp), "actual": text(act), "target": text(hmi_rule.target) if hmi_rule else None,
                          "bands": None if limits is None or sp is None else {
                              "warnLow": text(decimal(sp) - limits.warn_low), "warnHigh": text(decimal(sp) + limits.warn_high),
                              "critLow": text(decimal(sp) - limits.crit_low), "critHigh": text(decimal(sp) + limits.crit_high)},
-                         # A zone with no target (under a placeholder SKU) has its HMI setpoint unjudged (ADR-0022)
+                         # A zone with no target in the rules has its HMI setpoint unjudged (ADR-0027)
                          "hmi": "NO_TARGET" if hmi_rule is not None and hmi_rule.target is None else h.state,
-                         "hmiSince": h.since.isoformat() if h.since else None, "hmiDue": due(h.timer),
+                         "hmiSince": iso(h.since), "hmiDue": due(h.timer),
                          "hmiEvent": str(h.event_id) if h.event_id else None,
                          "actualSeverity": a.state.name, "actualPending": a.pending.name if a.pending else None,
                          "actualDue": due(a.timer), "actualEvent": str(a.event_id) if a.event_id else None,
@@ -464,12 +439,11 @@ class Engine:
         worst = max(skew.items(), key=lambda kv: abs(kv[1]), default=None)
         skew_warning = (f"The machine's clock is {abs(worst[1]):g} s {'behind' if worst[1] > 0 else 'ahead of'} ours "
                         f"on {worst[0].rsplit('/', 1)[-1]} (O-18)") if worst and abs(worst[1]) > SKEW_WARN_S else None
-        return {"judging": self.gate.open, "reasons": self.reasons, "sku": self.sku, "skuSeen": self.sku_value,
-                "skuPlaceholder": self.placeholder,
+        return {"judging": self.gate.open, "reasons": self.reasons,
                 "connected": self.connected, "actualPaused": self.actual_paused, "stop": self.stop.state,
-                "warmupUntil": self.stop.warmup_until.isoformat() if self.stop.warmup_until else None,
+                "warmupUntil": iso(self.stop.warmup_until),
                 "rulesVersion": self.cfg.rules_number, "mappingVersion": self.cfg.mapping_number,
                 "registerVersion": self.cfg.register.version, "zones": zones,
                 "maintenance": [_window(w) for w in self.windows if w is self.line_window or w in self.held.values()],
-                "lastLive": {t: d.isoformat() for t, d in self.last_live.items()},
+                "lastLive": {t: iso(d) for t, d in self.last_live.items()},
                 "clockSkewS": skew, "clockSkewWarning": skew_warning}

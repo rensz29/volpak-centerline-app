@@ -28,7 +28,7 @@ function HmiCell({ z, now, onOpenEvent }: { z: LiveZone; now: number; onOpenEven
   if (z.hmi === 'NO_TARGET') {
     return (
       <StateBadge tone="nodata" icon={MinusCircle} label="Not judged"
-                  title="No target for this zone under the placeholder SKU: give it one on Configuration → Rules to judge its HMI setpoint (ADR-0022)" />
+                  title="The rules give this zone no target: give it one on Configuration → Rules to judge its HMI setpoint (ADR-0027)" />
     )
   }
   if (z.hmi === 'OPEN' && z.hmiEvent) {

@@ -61,7 +61,6 @@ def main(cfg_path: str) -> int:
     known = tb.tag_names(contains=ns)
     labelled = [(f"{z.channel} setpoint", z.setpoint) for z in reg.zones] + \
                [(f"{z.channel} actual", z.actual) for z in reg.zones] + \
-               ([("SKU", reg.sku_tag)] if reg.sku_tag else []) + \
                [(f"context: {k}", v) for k, v in reg.context.items()] + reg.candidate_tags()
     L += [f"- Tags under the namespace: {len(known)}", "", "## Register tags", "",
           "| Role | Tag | In Timebase | Latest value | Quality | Last change (Timebase clock) |",
@@ -78,8 +77,6 @@ def main(cfg_path: str) -> int:
                  f"{'' if p is None else p.v} | {'' if p is None else p.q} | {'' if p is None else f'{p.t:%Y-%m-%d %H:%M:%S}'} |")
     if latest_err:
         L += ["", f"**Latest-value request failed:** {latest_err}"]
-    if not reg.sku_tag:
-        L += ["", "**No SKU tag in the register** (ADR-0007): the edge team still has to publish it."]
 
     end = int(tb.last_server_date or time.time())
     start = end - 3600

@@ -14,13 +14,14 @@ from datetime import datetime, timezone
 import numpy as np
 from centerline_common.historian import Gap, TagNotFound, TimebaseClient, TimebaseError
 from centerline_common.register import AnalyticsVariable, Register
+from centerline_common import isotime
 
 from ..problems import Problem
 from ..settings import Settings
 from . import stats
 from .buckets import aggregate, production_date, shift_of
 from .models import BUCKET_LABELS, BUCKETS, AnalyticsQuery
-from .ranges import load_ranges
+from .ranges import RangeCheck
 from .series import build_series, heartbeat_gaps, mask
 
 FUTURE_TOLERANCE_S = 60
@@ -62,9 +63,9 @@ def _duration(seconds: float) -> str:
     return f"{s / 3600:.1f} h"
 
 
-def options(settings: Settings, register: Register) -> dict:
+def options(settings: Settings, register: Register, ranges: RangeCheck) -> dict:
     a = settings.analytics
-    rc = load_ranges(a.ranges_csv, register)
+    rc = ranges
     variables = [_describe_variable(register, v) for v in register.analytics]
     actuals = [v for v in register.analytics if v.kind == "actual"]
     first = actuals[0] if actuals else None
@@ -80,11 +81,9 @@ def options(settings: Settings, register: Register) -> dict:
         "defaults": {"x": first.channel if first else None, "y": second.channel if second else None,
                      "bucket": "PT1M", "aggregation": "AVG", "shift": "ALL", "groupBy": "NONE", "rangeHours": 24},
         "limits": {"maxRangeDays": a.max_range_days, "pairLimit": a.pair_limit, "visibleGroups": a.visible_groups},
-        "sku": {"available": register.sku_tag is not None,
-                "reason": None if register.sku_tag else
-                "Timebase has no SKU tag for this machine yet, so results cover every product (ADR-0008)."},
-        "ranges": {"loaded": rc.ranges is not None, "source": rc.ranges.source if rc.ranges else None,
-                   "sha256": rc.ranges.sha256 if rc.ranges else None, "problems": rc.problems},
+        "ranges": {"loaded": rc.ranges is not None, "version": rc.ranges.version if rc.ranges else None,
+                   "source": rc.ranges.source if rc.ranges else None, "sha256": rc.ranges.sha256 if rc.ranges else None,
+                   "problems": rc.problems},
         "timezone": "Asia/Manila",
         "note": stats.NOTE,
         "registerVersion": register.version,
@@ -107,16 +106,14 @@ def _validate(q: AnalyticsQuery, settings: Settings, register: Register, now: fl
     max_s = settings.analytics.max_range_days * 86400
     if hi - lo > max_s:
         errors.append({"field": "from", "message": f"The range is longer than the {settings.analytics.max_range_days}-day maximum (ANA-18)"})
-    if q.sku and register.sku_tag is None:
-        errors.append({"field": "sku", "message": "SKU filtering isn't available: Timebase has no SKU tag for this machine yet (ADR-0008)"})
     if errors:
         raise Problem(422, "invalid-query", "The analytics query is invalid",
                       "; ".join(e["message"] for e in errors), errors=errors)
     return x, y, lo, hi
 
 
-def run(q: AnalyticsQuery, settings: Settings, register: Register, client_host: str | None = None,
-        now: float | None = None) -> dict:
+def run(q: AnalyticsQuery, settings: Settings, register: Register, ranges: RangeCheck, client_host: str | None = None,
+        user: str | None = None, now: float | None = None) -> dict:
     started = time.monotonic()
     now = time.time() if now is None else now
     a = settings.analytics
@@ -155,7 +152,7 @@ def run(q: AnalyticsQuery, settings: Settings, register: Register, client_host: 
     clock_offset = (client.last_server_date - time.time()) if client.last_server_date else None
 
     # -- clean and mask (ANA-09, ANA-10) -----------------------------------------------
-    rc = load_ranges(a.ranges_csv, register)
+    rc = ranges
     valid = rc.ranges.ranges if rc.ranges else {}
     sx, ex = build_series(data[x.tag], lo, hi, good_min=a.good_quality_min, valid=valid.get(x.parameter_id))
     sy, ey = build_series(data[y.tag], lo, hi, good_min=a.good_quality_min, valid=valid.get(y.parameter_id))
@@ -179,12 +176,10 @@ def run(q: AnalyticsQuery, settings: Settings, register: Register, client_host: 
                "bothValid": int((vx & vy).sum()), "outsideShift": int((vx & vy & ~in_shift).sum()), "paired": n_pairs}
 
     # -- warnings -------------------------------------------------------------------------
-    if register.sku_tag is None:
-        warnings.insert(0, {"code": "NO_SKU_TAG", "message": "Timebase has no SKU tag for this machine yet, so the results cover every product run in the range (ANA-05 deviation, ADR-0008)."})
-    if a.ranges_csv is None:
-        warnings.append({"code": "NO_RANGES", "message": "No Analytics-valid ranges are loaded, so out-of-range samples aren't excluded (ANA-10)."})
-    elif rc.problems:
-        warnings.append({"code": "RANGES_REJECTED", "message": "The Analytics-valid ranges file was rejected, so out-of-range samples aren't excluded: " + "; ".join(rc.problems)})
+    if rc.problems:
+        warnings.append({"code": "RANGES_REJECTED", "message": "The Analytics-valid ranges in effect aren't applied, so out-of-range samples aren't excluded: " + "; ".join(rc.problems)})
+    elif rc.ranges is None:
+        warnings.append({"code": "NO_RANGES", "message": "No Analytics-valid ranges are in effect, so out-of-range samples aren't excluded (ANA-10). An Administrator uploads them on Configuration → Analytics ranges."})
     if clock_offset is not None and abs(clock_offset) > a.clock_warning_s:
         side = "behind" if clock_offset < 0 else "ahead of"
         warnings.append({"code": "HISTORIAN_CLOCK", "message": f"The Timebase server clock is {_duration(clock_offset)} {side} this server. Bucket times and shift boundaries follow the Timebase clock (O-18)."})
@@ -201,12 +196,15 @@ def run(q: AnalyticsQuery, settings: Settings, register: Register, client_host: 
         warnings.append({"code": "VARIABLE_UNDER_REVIEW", "message": f"{v.parameter_name} ({v.zone_name}): {_caution(register, v)}"})
 
     result = {
-        "query": {"from": q.from_.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
-                  "to": q.to.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "query": {"from": isotime.iso(q.from_),
+                  "to": isotime.iso(q.to),
                   "x": x.channel, "y": y.channel, "bucket": q.bucket, "bucketSeconds": width, "aggregation": q.aggregation,
-                  "shift": q.shift, "groupBy": q.group_by, "groupStats": q.group_stats, "sku": q.sku},
+                  "shift": q.shift, "groupBy": q.group_by, "groupStats": q.group_stats},
         "x": _describe_variable(register, x), "y": _describe_variable(register, y),
         "exclusions": {"x": ex.as_dict(), "y": ey.as_dict()},
+        "ranges": {"version": rc.ranges.version if rc.ranges else None,
+                   "x": list(valid[x.parameter_id]) if x.parameter_id in valid else None,
+                   "y": list(valid[y.parameter_id]) if y.parameter_id in valid else None},
         "buckets": buckets,
         "sizeGuard": {"limit": a.pair_limit, "exceeded": False, "recommendedBucket": None},
         "pairs": None, "statistics": None, "groups": None,
@@ -219,7 +217,7 @@ def run(q: AnalyticsQuery, settings: Settings, register: Register, client_host: 
         result["sizeGuard"] |= {"exceeded": True, "recommendedBucket": rec}
         hint = f"choose {BUCKET_LABELS[rec]} or longer" if rec else "shorten the date range"
         warnings.append({"code": "TOO_MANY_PAIRS", "message": f"{n_pairs:,} paired buckets exceed the {a.pair_limit:,} limit, so no chart is drawn: {hint} (ANA-19)."})
-        return _finish(result, settings, client_host, started, fetch_ms, clock_offset, n_pairs)
+        return _finish(result, settings, client_host, user, started, fetch_ms, clock_offset, n_pairs)
 
     # -- statistics and groups (ANA-12, ANA-16, ANA-17) --------------------------------------
     ts, xs, ys = bx.start[paired], bx.value[paired], by.value[paired]
@@ -248,20 +246,20 @@ def run(q: AnalyticsQuery, settings: Settings, register: Register, client_host: 
 
     result["pairs"] = {"t": (ts * 1000).astype(np.int64).tolist(), "x": xs.tolist(), "y": ys.tolist(),
                        "g": keys.tolist() if keys is not None else None}
-    return _finish(result, settings, client_host, started, fetch_ms, clock_offset, n_pairs)
+    return _finish(result, settings, client_host, user, started, fetch_ms, clock_offset, n_pairs)
 
 
-def _finish(result: dict, settings: Settings, client_host: str | None, started: float, fetch_ms: float,
+def _finish(result: dict, settings: Settings, client_host: str | None, user: str | None, started: float, fetch_ms: float,
             clock_offset: float | None, n_pairs: int) -> dict:
     duration_ms = (time.monotonic() - started) * 1000
-    result["meta"] = {"generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    result["meta"] = {"generatedAt": isotime.iso(datetime.now(timezone.utc)),
                       "durationMs": round(duration_ms), "fetchMs": round(fetch_ms),
                       "historianClockOffsetS": None if clock_offset is None else round(clock_offset, 1),
                       "timezone": "Asia/Manila"}
     if settings.audit_log:
-        # Query metadata only: never the paired data (ANA-21). No login yet, so no user (Phase 1).
-        entry = {"at": result["meta"]["generatedAt"], "client": client_host, "user": None,
-                 "query": result["query"], "pairs": n_pairs, "exceeded": result["sizeGuard"]["exceeded"],
+        # Query metadata only: never the paired data (ANA-21)
+        entry = {"at": result["meta"]["generatedAt"], "client": client_host, "user": user,
+                 "query": result["query"], "ranges": result["ranges"]["version"], "pairs": n_pairs, "exceeded": result["sizeGuard"]["exceeded"],
                  "durationMs": round(duration_ms), "warnings": [w["code"] for w in result["warnings"]]}
         settings.audit_log.parent.mkdir(parents=True, exist_ok=True)
         with settings.audit_log.open("a", encoding="utf-8") as f:

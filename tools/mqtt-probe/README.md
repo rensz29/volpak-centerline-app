@@ -2,7 +2,7 @@
 
 A read-only listener for the plant broker. It shows what the machine actually
 publishes (topics, rates, gaps, payload format, clock offset), where each tag
-in the parameter register lives, and whether a SKU field exists yet. It
+in the parameter register lives. It
 writes `data/topic-map.json`, the tag → topic/field mapping that monitor-core
 will import.
 
@@ -42,7 +42,7 @@ stopped. Output lands in `data/`, or the folder given with `--out`:
 
 | File | Contents |
 |---|---|
-| `mqtt-probe-report.md` | Connection result, topics, gaps, "silent at end" (a stopped publisher), tag mapping, SKU field, freshness threshold |
+| `mqtt-probe-report.md` | Connection result, topics, gaps, "silent at end" (a stopped publisher), tag mapping, freshness threshold |
 | `topic-map.json` | `tag → {topic, field}` for every register tag seen, plus the ones not seen |
 | `samples.jsonl` | The first payloads per topic |
 
@@ -79,12 +79,11 @@ Send these before the first run. Most of them close items in ADR-0006 and ADR-00
    during the last day, but about 1 s in the last hour.
 5. **Liveness:** is there a status topic, Last Will or heartbeat when the edge
    publisher or PLC connection dies?
-6. **SKU (ADR-0007):** please add the running SKU/recipe to the machine payload.
-7. **Missing tags:** setpoint/actual pairs for P10 Feed and P11 Film Reel
+6. **Missing tags:** setpoint/actual pairs for P10 Feed and P11 Film Reel
    (only one tag each so far), and tags for P01 Sealing Temperature,
    P05 Hopper Pressure, P07 Discharge Time and a P08 speed setpoint.
-8. **P09 Pressure:** the tag named `Pressure_Setpoint` behaves like a sensor
+7. **P09 Pressure:** the tag named `Pressure_Setpoint` behaves like a sensor
    (about 21,000 changes a day, 0 when stopped) and `Pressure_Actual` like an
    operator setting (about 35 clean changes a day). Are the names swapped?
-9. **Clocks:** the publisher's `_timestamp` runs about 114 s behind real time,
+8. **Clocks:** the publisher's `_timestamp` runs about 114 s behind real time,
    and the Timebase server about 279 s. Please NTP-sync both.

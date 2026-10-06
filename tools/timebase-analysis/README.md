@@ -48,19 +48,19 @@ python analyse_delays.py config.json [--targets targets.csv] [--limits limits.cs
 ```
 
 Output: `data/delay-report.md`. Each zone (e.g. `P02.V3`) is analysed on its
-own and rolled up per parameter and for the line. Until the SKU tag exists,
-every shift is a run and its target is the setpoint held longest in that shift.
+own and rolled up per parameter and for the line. Every shift is a run;
+without `targets.csv` its target is the setpoint held longest in that shift.
 
-`targets.csv` and `limits.csv` are optional; `sku` and `zone_id` may be `*`:
+`targets.csv` and `limits.csv` are optional; `zone_id` may be `*`:
 
 ```csv
-sku,parameter_id,zone_id,target
-*,P02,V1,220
+parameter_id,zone_id,target
+P02,V1,220
 ```
 
 ```csv
-sku,parameter_id,zone_id,warn_low,warn_high,crit_low,crit_high
-*,P02,*,3,3,6,6
+parameter_id,zone_id,warn_low,warn_high,crit_low,crit_high
+P02,*,3,3,6,6
 ```
 
 Add `--running-only` to judge Actual severity the way

@@ -1,7 +1,8 @@
 # ADR-0012: Monitoring rules on the Configuration page, kept in PostgreSQL
 
 - **Status:** Accepted. Amended by [ADR-0016](ADR-0016-accounts-sign-in-and-roles.md): signing in needs the
-  database, so without it Analytics answers 503 too; the Rules tab is the Manager's to change
+  database, so without it Analytics answers 503 too; the Rules tab is the Manager's to change. Amended by
+  [ADR-0027](ADR-0027-no-sku.md) (2026-10-05): no SKU, so targets are set per zone and the line is judged once every zone has its limits
 - **Date:** 2026-09-30
 - **Decider:** Szyrelle (system owner)
 - **Confirms:** assumptions A-01 and A-02

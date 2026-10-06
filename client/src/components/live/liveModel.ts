@@ -25,7 +25,8 @@ export const EVENT_STATE_LABEL: Record<string, string> = {
   CRITICAL: 'Critical',
   RESOLVED: 'Resolved',
   SUPERSEDED: 'Superseded',
-  CLOSED_SKU_CHANGEOVER: 'Closed: SKU changeover',
+  // Recorded before ADR-0027 only: nothing closes an event for a product change now
+  CLOSED_SKU_CHANGEOVER: 'Closed: changeover (before ADR-0027)',
   CLOSED_MONITORING_DISABLED: 'Closed: monitoring switched off',
   ACKNOWLEDGED: 'Acknowledged',
 }
@@ -48,7 +49,7 @@ export const NOTIFICATION_LABEL: Record<string, string> = {
   recovery: 'Recovery notice',
   critical_repeat: 'Critical repeat',
   critical_escalation: 'Final escalation',
-  changeover: 'SKU changeover',
+  changeover: 'Changeover (before ADR-0027)',
   system: 'System alert',
 }
 

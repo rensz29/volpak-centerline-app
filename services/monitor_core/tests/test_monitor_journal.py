@@ -15,10 +15,10 @@ from centerline_monitor.service import MonitorSettings, Service
 def every_effect() -> list:
     z = E.ZoneRef("P02", "Vertical Temperature", "V1", "Vertical 1", "°C")
     v = E.Versions(uuid4(), uuid4(), uuid4())
-    return [E.OpenEvent(uuid4(), "ACTUAL", z, "A", at(1), v, {"target": "220"}, Decimal("220"), Decimal("222.5"), Decimal("225.1"),
+    return [E.OpenEvent(uuid4(), "ACTUAL", z, at(1), v, {"target": "220"}, Decimal("220"), Decimal("222.5"), Decimal("225.1"),
                         "CRITICAL", uuid4()),
             E.Transition(uuid4(), "CRITICAL", at(1), {"actual": "225.1", "hmi": "222.5"}, severity="CRITICAL"),
-            E.BriefChange(uuid4(), z, "A", "cleared_before_trigger", at(1), at(2), v, Decimal("220"), Decimal("222"), {"seen": ["222"]}),
+            E.BriefChange(uuid4(), z, "cleared_before_trigger", at(1), at(2), v, Decimal("220"), Decimal("222"), {"seen": ["222"]}),
             E.Notify("k:initial", "initial", at(1), {"zone": "V1"}, uuid4()), E.StartTimer("P02.V1:hmi", "hmi_delay", at(31)),
             E.CancelTimer("P02.V1:actual"), E.TimerDone("P02.V1:hmi", at(31)), E.PauseStarted("line", at(3), ["SPC silent"]),
             E.PauseEnded("line", at(4))]

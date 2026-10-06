@@ -7,7 +7,7 @@
 Subscribes to the configured topic filters, listens, and writes to data/:
 * mqtt-probe-report.md: connection and subscription result, every topic seen
   (message rate, gaps, retained flag, payload format, fields, payload clock
-  offset), where each register tag was found, SKU-like fields, and the
+  offset), where each register tag was found, and the
   freshness threshold the measured gaps support;
 * topic-map.json: register tag → {topic, field}, the mapping monitor-core imports;
 * samples.jsonl: the first payloads of each topic, for inspection.
@@ -37,13 +37,6 @@ import register as register_mod  # noqa: E402
 
 OUT = Path(__file__).parent / "data"
 TS_FIELDS = ("_timestamp", "timestamp", "Timestamp", "ts")
-SKU_HINTS = ("sku", "recipe", "product", "material", "order", "batch")
-
-
-def sku_like(field: str, value) -> bool:
-    """A field named like a SKU or recipe, and not a true/false flag such as Product_Inlet_Valve."""
-    return any(h in field.lower() for h in SKU_HINTS) and not isinstance(value, bool) \
-        and str(value).strip().lower() not in ("true", "false")
 
 
 class TopicStats:
@@ -252,7 +245,6 @@ def write_report(cfg, reg, subs, host, port, v5, tls, result, stats, elapsed, t_
             lookup[dotted] = (topic, None)
     labelled = [(f"{z.channel} setpoint", z.setpoint) for z in reg.zones] + \
                [(f"{z.channel} actual", z.actual) for z in reg.zones] + \
-               ([("SKU", reg.sku_tag)] if reg.sku_tag else []) + \
                [(f"context: {k}", v) for k, v in reg.context.items()] + reg.candidate_tags()
     topic_map, missing = {}, []
     L += ["", "## Register tags on MQTT", "", "| Role | Tag | Topic | Field | Sample |", "|---|---|---|---|---|"]
@@ -267,10 +259,6 @@ def write_report(cfg, reg, subs, host, port, v5, tls, result, stats, elapsed, t_
             missing.append(tag)
             L.append(f"| {role} | `{tag.split(ns + '.')[-1]}` | **not seen** | | |")
 
-    candidates = [(t, k, v) for t, st in stats.items() for k, v in st.fields.items() if sku_like(k, v)]
-    L += ["", "## SKU field (ADR-0007)", ""]
-    L += [f"- Candidate: `{t}` field `{k}` = {v!r}" for t, k, v in candidates] or \
-         ["- No SKU-, recipe- or product-like field seen: the edge team still has to add it."]
 
     L += ["", "## Freshness threshold (ADR-0006)", "",
           "A topic is stale when no message has arrived for longer than the threshold. It must sit above "

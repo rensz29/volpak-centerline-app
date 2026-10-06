@@ -20,6 +20,7 @@ from psycopg.types.json import Jsonb
 from centerline_common import routing as routing_mod
 from centerline_common.channels import Outcome
 from centerline_common.db import uuid7
+from centerline_common.isotime import iso, parse
 from centerline_common.outbox import add_delivery
 
 from .schedule import GIVE_UP, next_attempt
@@ -33,7 +34,7 @@ def route_pending(conn, now: datetime, *, line: str, app_url: str | None) -> int
     """Route every message not routed yet, oldest first. Returns how many were routed."""
     active = conn.execute("SELECT number, rules FROM routing_version WHERE id = active_routing_version()").fetchone()
     rows = conn.execute("""SELECT n.id, n.dedup_key, n.kind, n.event_id, n.created_at, n.payload,
-                                  e.kind AS event_kind, e.opened_at, e.sku_code, e.rule AS event_rule
+                                  e.kind AS event_kind, e.opened_at, e.rule AS event_rule
                              FROM notification n LEFT JOIN event e ON e.id = n.event_id
                             WHERE NOT EXISTS (SELECT 1 FROM notification_route r WHERE r.notification_id = n.id)
                             ORDER BY n.created_at, n.id LIMIT %s""", (ROUTE_BATCH,)).fetchall()
@@ -54,7 +55,7 @@ def route_pending(conn, now: datetime, *, line: str, app_url: str | None) -> int
                            (n["id"], now, type_, active["number"] if active else None, Jsonb(matched), outcome)).fetchone()
         if won and places:
             event = None if n["event_id"] is None else {"kind": n["event_kind"], "opened_at": n["opened_at"],
-                                                         "sku_code": n["sku_code"], "rule": n["event_rule"]}
+                                                         "rule": n["event_rule"]}
             for rule, channel, target in places:
                 add_delivery(conn, n, type_, channel, target, rule, now, event=event, line=line, app_url=app_url)
         conn.commit()
@@ -120,12 +121,12 @@ def watch_monitor(conn, now: datetime, stale_s: float) -> str | None:
     raised = None
     if (now - beat["beat_at"]).total_seconds() > stale_s:
         key = f"watch:monitor-core:{beat['instance']}:{beat['beat_at'].isoformat()}"
-        raised = _system(conn, key, now, {"kind": SILENT, "instance": beat["instance"], "since": beat["beat_at"].isoformat(),
+        raised = _system(conn, key, now, {"kind": SILENT, "instance": beat["instance"], "since": iso(beat["beat_at"]),
                                          "silentS": round((now - beat["beat_at"]).total_seconds())})
     else:
         last = conn.execute("""SELECT dedup_key, payload FROM notification WHERE kind = 'system' AND payload->>'kind' = %s
                                 ORDER BY created_at DESC LIMIT 1""", (SILENT,)).fetchone()
-        if last and beat["beat_at"] > datetime.fromisoformat(last["payload"]["since"]):
+        if last and beat["beat_at"] > parse(last["payload"]["since"]):
             raised = _system(conn, last["dedup_key"] + ":back", now,
                              {"kind": "monitor-core back", "instance": beat["instance"], "since": last["payload"]["since"]})
     conn.commit()

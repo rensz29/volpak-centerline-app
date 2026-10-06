@@ -19,9 +19,9 @@ def versions(conn):
 
 def event(conn, v, kind, pid, zid, state, severity=None, open_=True, hmi=None, actual=None):
     eid = uuid7()
-    conn.execute("""INSERT INTO event (id, kind, parameter_id, zone_id, sku_code, opened_at, severity, raw_target, raw_hmi, raw_actual,
+    conn.execute("""INSERT INTO event (id, kind, parameter_id, zone_id, opened_at, severity, raw_target, raw_hmi, raw_actual,
                                        config_version_id, mapping_version_id, register_version_id, rule)
-                    VALUES (%s, %s, %s, %s, 'A', now() - interval '5 min', %s, 180, %s, %s, %s, %s, %s, %s)""",
+                    VALUES (%s, %s, %s, %s, now() - interval '5 min', %s, 180, %s, %s, %s, %s, %s, %s)""",
                  (eid, kind, pid, zid, severity, hmi, actual, *v, Jsonb({"rules_version": 3})))
     conn.execute("INSERT INTO event_state (event_id, state, severity, open, updated_at, closed_at) VALUES (%s, %s, %s, %s, now(), %s)",
                  (eid, state, severity, open_, None if open_ else "2026-10-01T00:00:00Z"))
@@ -34,7 +34,7 @@ def beat(conn, age_s=1, zones=None):
     conn.execute("""INSERT INTO monitor_heartbeat (instance, started_at, beat_at, status)
                     VALUES ('pc', now() - interval '1 hour', now() - make_interval(secs => %s), %s)
                     ON CONFLICT (instance) DO UPDATE SET beat_at = EXCLUDED.beat_at, status = EXCLUDED.status""",
-                 (age_s, Jsonb({"judging": True, "reasons": [], "sku": "A", "rulesVersion": 3, "zones": zones or {}})))
+                 (age_s, Jsonb({"judging": True, "reasons": [], "rulesVersion": 3, "zones": zones or {}})))
 
 
 def test_without_monitor_core_every_zone_is_unknown(make_client):
@@ -56,7 +56,7 @@ def test_live_state_combines_the_heartbeat_with_the_open_events(make_client, dat
                                         "hmi": "AT_TARGET", "bands": {"warnLow": "175", "warnHigh": "185", "critLow": "170", "critHigh": "190"}}})
         conn.commit()
     body = c.get("/api/v1/monitoring/live").json()
-    assert body["monitor"]["alive"] and body["monitor"]["judging"] and body["monitor"]["sku"] == "A"
+    assert body["monitor"]["alive"] and body["monitor"]["judging"] and "sku" not in body["monitor"]
     assert body["counts"] == {"zones": 14, "hmiOpen": 1, "warning": 0, "critical": 1}
     front = next(z for p in body["parameters"] for z in p["zones"] if z["channel"] == "P03.FRONT")
     assert front["known"] and front["actual"] == "191.5" and front["actualSeverity"] == "CRITICAL" and front["events"] == [str(critical)]
@@ -82,9 +82,9 @@ def test_event_lists_details_and_brief_changes(make_client, database):
         event(conn, v, "ACTUAL", "P06", "N1", "WARNING", "WARNING", actual=108)
         conn.execute("""INSERT INTO notification (id, dedup_key, kind, event_id, created_at, payload) VALUES (%s, %s, 'initial', %s, now(), '{}')""",
                      (uuid7(), f"{closed}:initial", closed))
-        conn.execute("""INSERT INTO lightweight_change (id, parameter_id, zone_id, sku_code, mode, started_at, ended_at, raw_target, raw_hmi,
+        conn.execute("""INSERT INTO lightweight_change (id, parameter_id, zone_id, mode, started_at, ended_at, raw_target, raw_hmi,
                                                         config_version_id, mapping_version_id)
-                        VALUES (%s, 'P04', 'FRONT', 'A', 'lightweight', now() - interval '20 s', now(), 185, 187, %s, %s)""",
+                        VALUES (%s, 'P04', 'FRONT', 'lightweight', now() - interval '20 s', now(), 185, 187, %s, %s)""",
                      (uuid7(), v[0], v[1]))
         conn.commit()
     assert [e["kind"] for e in c.get("/api/v1/events", params={"open": "false"}).json()["events"]] == ["HMI_MISMATCH"]

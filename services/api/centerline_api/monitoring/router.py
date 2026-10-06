@@ -16,6 +16,7 @@ from typing import Literal
 from uuid import UUID
 
 from centerline_common.db import uuid7
+from centerline_common import isotime
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import Field
 
@@ -40,7 +41,7 @@ def _zone_names(register) -> dict[str, dict]:
     return {z.channel: {"parameterName": z.parameter_name, "zoneName": z.zone_name, "unit": z.unit} for z in register.zones}
 
 
-EVENT_COLUMNS = """e.id, e.kind, e.parameter_id, e.zone_id, e.sku_code, e.opened_at, e.raw_target, e.raw_hmi, e.raw_actual,
+EVENT_COLUMNS = """e.id, e.kind, e.parameter_id, e.zone_id, e.opened_at, e.raw_target, e.raw_hmi, e.raw_actual,
                    e.supersedes_event_id, e.rule, s.state, s.severity, s.open, s.closed_at, s.acknowledged_at"""
 
 
@@ -48,7 +49,7 @@ def _event(r: dict, names: dict[str, dict]) -> dict:
     ch = f"{r['parameter_id']}.{r['zone_id']}"
     return {"id": str(r["id"]), "kind": r["kind"], "parameterId": r["parameter_id"], "zoneId": r["zone_id"], "channel": ch,
             **names.get(ch, {"parameterName": r["parameter_id"], "zoneName": r["zone_id"], "unit": None}),
-            "sku": r["sku_code"], "openedAt": iso(r["opened_at"]), "state": r["state"], "severity": r["severity"],
+            "openedAt": iso(r["opened_at"]), "state": r["state"], "severity": r["severity"],
             "open": r["open"], "closedAt": iso(r["closed_at"]), "acknowledgedAt": iso(r["acknowledged_at"]),
             "target": _num(r["raw_target"]), "hmi": _num(r["raw_hmi"]), "actual": _num(r["raw_actual"]),
             "supersedes": str(r["supersedes_event_id"]) if r["supersedes_event_id"] else None,
@@ -83,7 +84,7 @@ def live(request: Request, conn=Depends(connect)) -> dict:
         "monitor": None if beat is None else {
             "instance": beat["instance"], "startedAt": iso(beat["started_at"]), "beatAt": iso(beat["beat_at"]),
             "ageS": round(float(beat["age"]), 1), "alive": alive,
-            **{k: beat["status"].get(k) for k in ("judging", "reasons", "sku", "skuSeen", "skuPlaceholder", "connected", "actualPaused", "stop",
+            **{k: beat["status"].get(k) for k in ("judging", "reasons", "connected", "actualPaused", "stop",
                                                    "warmupUntil", "rulesVersion", "mappingVersion", "registerVersion", "lastLive")}},
         "parameters": parameters,
         "events": events,
@@ -148,14 +149,14 @@ def list_events(request: Request, open: bool | None = None, kind: Kind | None = 
         try:
             at, eid = before.split("|", 1)
             clauses.append("(e.opened_at, e.id) < (%s, %s)")
-            args += [datetime.fromisoformat(at), UUID(eid)]
+            args += [isotime.parse(at), UUID(eid)]
         except ValueError:
             raise Problem(422, "invalid-cursor", "Invalid page cursor", "Use the `next` value of the previous page") from None
     rows = conn.execute(f"SELECT {EVENT_COLUMNS} FROM event e JOIN event_state s ON s.event_id = e.id {_where(clauses)} "
                         "ORDER BY e.opened_at DESC, e.id DESC LIMIT %s", (*args, limit)).fetchall()
     last = rows[-1] if len(rows) == limit else None
     return {"events": [_event(r, names) for r in rows],
-            "next": f"{last['opened_at'].isoformat()}|{last['id']}" if last else None}
+            "next": f"{isotime.iso(last['opened_at'])}|{last['id']}" if last else None}
 
 
 @router.get("/events/counts", summary="Open events by kind and severity, for the sidebar and the bell")
@@ -187,16 +188,16 @@ def export_events(request: Request, open: bool | None = None, kind: Kind | None 
                              ORDER BY e.opened_at DESC, e.id DESC LIMIT %s""", (*args, EXPORT_MAX)).fetchall()
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["Opened (Manila)", "Closed (Manila)", "Kind", "Severity", "State", "Parameter", "Zone", "Channel", "SKU",
+    w.writerow(["Opened (Manila)", "Closed (Manila)", "Kind", "Severity", "State", "Parameter", "Zone", "Channel",
                 "Target at opening", "HMI at opening", "Actual at opening", "Unit", "Rules version", "Acknowledged (Manila)",
                 "Acknowledged by", "Event ID"])
     for r in rows:
         e = _event(r, names)
         w.writerow([_manila(r["opened_at"]), _manila(r["closed_at"]), "HMI mismatch" if e["kind"] == "HMI_MISMATCH" else "Actual",
-                    (e["severity"] or "").title(), e["state"], e["parameterName"], e["zoneName"], e["channel"], e["sku"],
+                    (e["severity"] or "").title(), e["state"], e["parameterName"], e["zoneName"], e["channel"],
                     e["target"] or "", e["hmi"] or "", e["actual"] or "", e["unit"] or "", e["rulesVersion"] or "",
                     _manila(r["acknowledged_at"]), r["ack_by"] or "", e["id"]])
-    filters = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in
+    filters = {k: (isotime.iso(v) if isinstance(v, datetime) else v) for k, v in
                (("open", open), ("kind", kind), ("severity", severity), ("reached", reached), ("channel", channel),
                 ("since", since), ("until", until))
                if v is not None}
@@ -298,14 +299,14 @@ def acknowledge(event_id: UUID, body: AcknowledgeIn, request: Request, conn=Depe
 @router.get("/monitoring/brief-changes", summary="Setpoints back on target before the delay ended (HMI-05), newest first")
 def brief_changes(request: Request, limit: int = Query(20, ge=1, le=200), conn=Depends(connect)) -> dict:
     names = _zone_names(request.app.state.register_store.load(conn))
-    rows = conn.execute("""SELECT id, parameter_id, zone_id, sku_code, mode, started_at, ended_at, raw_target, raw_hmi
+    rows = conn.execute("""SELECT id, parameter_id, zone_id, mode, started_at, ended_at, raw_target, raw_hmi
                              FROM lightweight_change ORDER BY ended_at DESC LIMIT %s""", (limit,)).fetchall()
     out = []
     for r in rows:
         ch = f"{r['parameter_id']}.{r['zone_id']}"
         out.append({"id": str(r["id"]), "channel": ch, **names.get(ch, {"parameterName": r["parameter_id"], "zoneName": r["zone_id"],
                                                                          "unit": None}),
-                    "sku": r["sku_code"], "mode": r["mode"], "startedAt": iso(r["started_at"]), "endedAt": iso(r["ended_at"]),
+                    "mode": r["mode"], "startedAt": iso(r["started_at"]), "endedAt": iso(r["ended_at"]),
                     "seconds": round((r["ended_at"] - r["started_at"]).total_seconds(), 1),
                     "target": _num(r["raw_target"]), "hmi": _num(r["raw_hmi"])})
     return {"briefChanges": out}

@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import itertools
 import os
+import re
 import shutil
 import threading
 import uuid
@@ -97,9 +98,28 @@ def make_settings(url: str, tmp_path: Path, database: DatabaseConfig, auth: Auth
                     migrate_database=migrations)
 
 
+_PLUS_ZERO = re.compile(r"\d{2}:\d{2}:\d{2}(\.\d+)?\+00:00")
+
+
+class Browser(TestClient):
+    """What the web app does: a new Idempotency-Key on each POST (SDD §11; `None` sends none), and it is never
+    answered a time written `+00:00` instead of `Z` (ADR-0028)."""
+
+    def request(self, method, url, *args, headers=None, **kwargs):
+        headers = dict(headers or {})
+        if method.upper() == "POST" and not any(k.lower() == "idempotency-key" for k in headers):
+            headers["Idempotency-Key"] = str(uuid.uuid4())
+        headers = {k: v for k, v in headers.items() if v is not None}
+        response = super().request(method, url, *args, headers=headers, **kwargs)
+        if "json" in response.headers.get("content-type", ""):
+            found = _PLUS_ZERO.search(response.text)
+            assert not found, f"{method} {url} answered a time written +00:00: …{response.text[max(0, found.start() - 60):found.end()]}"
+        return response
+
+
 def new_client(app, address: str = "127.0.0.1") -> TestClient:
     """A browser: https (the cookie is Secure) and the CSRF header on every request."""
-    return TestClient(app, base_url="https://testserver", headers={CSRF_HEADER: "1"}, client=(address, 50000))
+    return Browser(app, base_url="https://testserver", headers={CSRF_HEADER: "1"}, client=(address, 50000))
 
 
 def add_account(app, database: DatabaseConfig, roles=OWNER, username: str | None = None, password: str = PASSWORD,

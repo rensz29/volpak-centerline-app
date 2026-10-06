@@ -156,7 +156,7 @@ def main() -> int:
             continue
         wl, wh = round_out(max(lows), step), round_out(max(highs), step)
         cl, ch = round_out(2 * wl, step), round_out(2 * wh, step)
-        rows_csv.append(["*", pid, "*", f"{wl:g}", f"{wh:g}", f"{cl:g}", f"{ch:g}"])
+        rows_csv.append([pid, "*", f"{wl:g}", f"{wh:g}", f"{cl:g}", f"{ch:g}"])
         unit = p.get("unit") or ""
         L.append(f"| {pid} {p['name']} | {sum(r[1] for r in rows):,.0f} | "
                  f"{min(r[2][0] for r in rows):+.3g} · {sorted(r[2][1] for r in rows)[len(rows) // 2]:+.3g} · {max(highs):+.3g} {unit} | "
@@ -171,7 +171,7 @@ def main() -> int:
                   "the tags are swapped; low and high swap sides."]
     with (OUT / "limits-proposed.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["sku", "parameter_id", "zone_id", "warn_low", "warn_high", "crit_low", "crit_high"])
+        w.writerow(["parameter_id", "zone_id", "warn_low", "warn_high", "crit_low", "crit_high"])
         w.writerows(rows_csv)
     (OUT / "limits-report.md").write_text("\n".join(L) + "\n", encoding="utf-8")
     print(f"wrote {OUT / 'limits-proposed.csv'} and limits-report.md")

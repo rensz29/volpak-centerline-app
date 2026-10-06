@@ -16,6 +16,7 @@ from pathlib import Path
 import psycopg
 from centerline_common import shifts, workflow
 from centerline_common.db import DatabaseConfig, DatabaseUnavailable, uuid7
+from centerline_common.isotime import iso
 from psycopg.types.json import Jsonb
 
 from . import config as config_mod
@@ -135,10 +136,10 @@ class Store:
             parameter, zone, unit = names.get((r["parameter_id"], r["zone_id"]), (r["parameter_id"], r["zone_id"], None))
             shift = shifts.Shift(r["shift"], r["starts_at"], r["ends_at"], r["production_date"])
             payload = {"kind": "Reason overdue", "parameter": r["parameter_id"], "parameterName": parameter,
-                       "zone": r["zone_id"], "zoneName": zone, "unit": unit, "sku": r["sku_code"],
+                       "zone": r["zone_id"], "zoneName": zone, "unit": unit,
                        "hmi": text(r["raw_hmi"]), "target": text(r["raw_target"]),
                        "shift": r["shift"], "shiftLabel": shifts.label(shift), "request": str(r["id"]),
-                       "waitingSince": r["created_at"].isoformat(), "status": r["status"]}
+                       "waitingSince": iso(r["created_at"]), "status": r["status"]}
             conn.execute("""INSERT INTO notification (id, dedup_key, kind, event_id, created_at, payload)
                             VALUES (%s, %s, 'workflow_escalation', %s, %s, %s) ON CONFLICT (dedup_key) DO NOTHING""",
                          (uuid7(), f"workflow:{r['id']}:escalation", r["event_id"], now, Jsonb(payload)))
@@ -202,11 +203,11 @@ class Store:
     def _write(conn, e, at: datetime) -> None:
         if isinstance(e, OpenEvent):
             v = e.versions
-            conn.execute("""INSERT INTO event (id, kind, parameter_id, zone_id, sku_code, opened_at, severity, raw_target,
+            conn.execute("""INSERT INTO event (id, kind, parameter_id, zone_id, opened_at, severity, raw_target,
                                                raw_hmi, raw_actual, config_version_id, mapping_version_id,
                                                register_version_id, supersedes_event_id, rule)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING""",
-                         (e.event_id, e.kind, e.zone.parameter_id, e.zone.zone_id, e.sku, e.at, e.severity, e.raw_target,
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING""",
+                         (e.event_id, e.kind, e.zone.parameter_id, e.zone.zone_id, e.at, e.severity, e.raw_target,
                           e.raw_hmi, e.raw_actual, v.config_version_id, v.mapping_version_id, v.register_version_id,
                           e.supersedes, Jsonb(e.rule)))
             conn.execute("""INSERT INTO event_state (event_id, state, severity, open, updated_at) VALUES (%s, %s, %s, true, %s)
@@ -230,10 +231,10 @@ class Store:
                     workflow.close_requests(conn, e.event_id, e.state, e.at)  # its reason request closes with it
         elif isinstance(e, BriefChange):
             v = e.versions
-            conn.execute("""INSERT INTO lightweight_change (id, parameter_id, zone_id, sku_code, mode, started_at, ended_at,
+            conn.execute("""INSERT INTO lightweight_change (id, parameter_id, zone_id, mode, started_at, ended_at,
                                                             raw_target, raw_hmi, config_version_id, mapping_version_id, evidence)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING""",
-                         (e.id, e.zone.parameter_id, e.zone.zone_id, e.sku, e.mode, e.started_at, e.ended_at, e.raw_target,
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (id) DO NOTHING""",
+                         (e.id, e.zone.parameter_id, e.zone.zone_id, e.mode, e.started_at, e.ended_at, e.raw_target,
                           e.raw_hmi, v.config_version_id, v.mapping_version_id, Jsonb(e.evidence) if e.evidence else None))
         elif isinstance(e, Notify):
             conn.execute("""INSERT INTO notification (id, dedup_key, kind, event_id, created_at, payload)

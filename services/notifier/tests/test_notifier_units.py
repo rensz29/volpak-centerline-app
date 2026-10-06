@@ -35,8 +35,7 @@ def test_each_kind_of_message_has_one_routing_type():
     assert t("initial", {"kind": "Actual Critical"}) == t("escalated", {}) == "actual_critical"
     assert (t("critical_repeat", {}), t("critical_escalation", {}), t("recovery", {})) == \
         ("critical_repeat", "critical_escalation", "recovery")
-    assert (t("changeover", {}), t("system", {"kind": "Maintenance overdue (MNT-01)"}), t("test", {})) == \
-        ("changeover", "system", "test")
+    assert (t("system", {"kind": "Maintenance overdue (MNT-01)"}), t("test", {})) == ("system", "test")
 
 
 def test_routing_rules_are_checked_and_criticals_must_reach_someone():
@@ -70,14 +69,15 @@ def outbox(kind, payload, event_id=None):
     return {"id": "n1", "dedup_key": "e1:initial", "kind": kind, "event_id": event_id, "created_at": T0, "payload": payload}
 
 
-ZONE = {"parameter": "P03", "parameterName": "Bottom Temperature", "zone": "REAR", "zoneName": "Rear", "unit": "°C", "sku": "67890123"}
+ZONE = {"parameter": "P03", "parameterName": "Bottom Temperature", "zone": "REAR", "zoneName": "Rear", "unit": "°C"}
 
 
 def test_each_message_says_what_happened_where_and_when_in_manila_time():
     m = messages.render(outbox("initial", {**ZONE, "kind": "HMI mismatch", "hmi": "190", "target": "180"}, "e1"), "hmi_mismatch",
                         app_url="https://centerline.plant.test/")
     assert m["subject"] == "HMI mismatch · Bottom Temperature · Rear · Volpak" and m["severity"] == "MISMATCH"
-    assert m["text"] == "The HMI setpoint 190 °C differs from the target 180 °C for SKU 67890123."
+    assert m["text"] == "The HMI setpoint 190 °C differs from the target 180 °C."
+    assert "SKU" not in {f["name"] for f in m["facts"]}  # Centerline has no SKU (ADR-0027)
     facts = {f["name"]: f["value"] for f in m["facts"]}
     assert facts["Zone"] == "Bottom Temperature · Rear (P03.REAR)" and facts["Sent"] == "01 Oct 2026 14:00:00 Manila"
     assert m["link"] == "https://centerline.plant.test/alarms/active?event=e1" and m["footer"].endswith("ref e1:initial")
@@ -91,11 +91,11 @@ def test_each_message_says_what_happened_where_and_when_in_manila_time():
     assert back["subject"].startswith("Back to normal") and back["link"] == "https://c/alarms/history?event=e1"
     on_target = messages.render(outbox("recovery", {**ZONE, "hmi": "180", "target": "180"}), "recovery", event={"kind": "HMI_MISMATCH"})
     assert on_target["text"] == "The HMI setpoint 180 °C is back on the target 180 °C."
-    placeholder = messages.render(outbox("initial", {**ZONE, "kind": "Actual Warning", "sku": "PLACEHOLDER"}), "actual_warning",
-                                  event={"kind": "ACTUAL", "rule": {"sku_placeholder": True}})
-    assert {f["name"]: f["value"] for f in placeholder["facts"]}["SKU"].startswith("PLACEHOLDER (placeholder")
     silent = messages.render(outbox("system", {"kind": "monitor-core silent", "since": "2026-10-01T05:59:00+00:00"}), "system")
     assert silent["severity"] == "CRITICAL" and "13:59:00 Manila" in silent["text"]
+    paused = messages.render(outbox("system", {"kind": "Rules incomplete (OPC-08)", "reasons": ["The rules in effect don't give every zone "
+                                                "its Warning and Critical limits (Configuration → Rules)"]}), "system")
+    assert paused["subject"] == "Monitoring paused: the rules are incomplete · Volpak" and "Warning and Critical limits" in paused["text"]
     assert messages.render(outbox("test", {"by": "szyrelle"}), "test")["subject"] == "TEST - NO PRODUCTION EVENT"  # NOT-07
 
 

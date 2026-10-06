@@ -8,9 +8,15 @@ import type { ProblemDocument } from '@/types/analyticsApi'
  * Sign-in (ADR-0016): the session is an HttpOnly cookie the browser sends by itself.
  * Every state-changing call carries the CSRF header; a 401 anywhere means the session
  * ended, and a change that went through counts as the person's own activity.
+ *
+ * Every POST carries a new Idempotency-Key (SDD §11, ADR-0028). If the answer is lost on
+ * the way, the POST is sent once more with the same key, so the api answers it again
+ * instead of saving it twice.
  */
 
 export const CSRF_HEADER = 'X-Centerline-CSRF'
+export const IDEMPOTENCY_HEADER = 'Idempotency-Key'
+const RETRY_AFTER_MS = 1000
 export const SIGNED_OUT_EVENT = 'centerline:signed-out'
 export const ACTIVITY_EVENT = 'centerline:activity'
 const SAFE = new Set(['GET', 'HEAD', 'OPTIONS'])
@@ -37,15 +43,30 @@ export class ApiProblem extends Error {
   }
 }
 
+/** A random key for one action. crypto.randomUUID needs a secure context; getRandomValues doesn't. */
+function newKey(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+const aborted = (error: unknown) => error instanceof DOMException && error.name === 'AbortError'
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? 'GET').toUpperCase()
   const headers = new Headers(init?.headers)
   if (!SAFE.has(method)) headers.set(CSRF_HEADER, '1')
+  if (method === 'POST' && !headers.has(IDEMPOTENCY_HEADER)) headers.set(IDEMPOTENCY_HEADER, newKey())
+  const send = () => fetch(path, { ...init, headers, credentials: 'same-origin' })
   let response: Response
   try {
-    response = await fetch(path, { ...init, headers, credentials: 'same-origin' })
+    response = await send().catch(async (error: unknown) => {
+      // The POST may have gone through with only its answer lost: the same key gets that answer again
+      if (method !== 'POST' || aborted(error)) throw error
+      await new Promise((resolve) => window.setTimeout(resolve, RETRY_AFTER_MS))
+      return send()
+    })
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    if (aborted(error)) throw error
     throw new ApiProblem(0, {
       title: 'The Centerline api is not reachable',
       detail: 'Check that the api service is running (see services/api/README.md).',

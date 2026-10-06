@@ -37,29 +37,30 @@ def targets() -> dict[str, float]:
     return out
 
 
-def rule_rows(skus=("A", "B"), extra: list[dict] | None = None) -> list[dict]:
-    def row(**f):
-        return {"sku": None, "zone_id": None, **{k: None for k in rules_mod.FIELDS}, **f}
+def rule_row(**f) -> dict:
+    return {"zone_id": None, **{k: None for k in rules_mod.FIELDS}, **f}
 
-    rows = [row(parameter_id=p, warn_low=Decimal(str(a)), warn_high=Decimal(str(b)), crit_low=Decimal(str(c)),
-                crit_high=Decimal(str(d))) for p, (a, b, c, d) in PROPOSED.items()]
-    for sku in skus:
-        for z in REG.zones:
-            rows.append(row(sku=sku, parameter_id=z.parameter_id, zone_id=z.zone_id, target=Decimal(str(targets()[z.channel]))))
+
+def rule_rows(with_targets: bool = True, extra: list[dict] | None = None) -> list[dict]:
+    """The proposal's limits per parameter and, unless told not to, every zone's target (the simulator's setpoint)."""
+    rows = [rule_row(parameter_id=p, warn_low=Decimal(str(a)), warn_high=Decimal(str(b)), crit_low=Decimal(str(c)),
+                     crit_high=Decimal(str(d))) for p, (a, b, c, d) in PROPOSED.items()]
+    if with_targets:
+        rows += [rule_row(parameter_id=z.parameter_id, zone_id=z.zone_id, target=Decimal(str(targets()[z.channel])))
+                 for z in REG.zones]
     return rows + (extra or [])
 
 
-def make_config(rows=None, skus=("A", "B"), settings=None, sku_place=(f"{BASE}/SPC", "SKU_Code"), rules_number=1,
-                sku_placeholder: str | None = None) -> EngineConfig:
+def make_config(rows=None, settings=None, rules_number=1) -> EngineConfig:
     rel = lambda t: t[len(REG.namespace) + 1:]  # noqa: E731
     tags = [rel(t) for z in REG.zones for t in (z.setpoint, z.actual)] + [rel(t) for t in REG.context.values()]
     cfg = EngineConfig(register=REG, register_version_id=uuid4(),
                        mapping={t: (f"{BASE}/{t.split('.', 1)[0]}", t.split(".", 1)[1]) for t in tags},
-                       sku_place=sku_place, sku_placeholder=sku_placeholder, mapping_version_id=uuid4(), mapping_number=1,
+                       mapping_version_id=uuid4(), mapping_number=1,
                        settings=settings or {"pause_when_stopped": {"enabled": True, "long_stop_min": 10, "warmup_min": 30},
                                              "defaults": DEFAULTS},
-                       rules=rule_rows(skus) if rows is None else rows, config_version_id=uuid4(), rules_number=rules_number,
-                       skus=tuple(skus), freshness_s={"SPC": 30, "Dosing_Parameters": 90})
+                       rules=rule_rows() if rows is None else rows, config_version_id=uuid4(), rules_number=rules_number,
+                       freshness_s={"SPC": 30, "Dosing_Parameters": 90})
     cfg.__post_init__()
     return cfg
 
@@ -81,7 +82,7 @@ class FakeStore:
 class Line:
     """The machine as MQTT sees it: every tag's value, published one message per area."""
 
-    def __init__(self, sku: str | None = "A"):
+    def __init__(self):
         self.values: dict[str, float] = {}
         for z in REG.zones:
             t = targets()[z.channel]
@@ -89,7 +90,6 @@ class Line:
             self.values[z.actual] = t
         self.values[REG.context["machine_run"]] = 1
         self.values[REG.context["machine_speed"]] = 41
-        self.sku = sku
         self.silent: set[str] = set()
         self.clock_behind_s = 0.0  # the machine stamps _timestamp on its own clock (the plant's ran 114 s slow, ADR-0006)
 
@@ -111,8 +111,6 @@ class Line:
             rel = tag[len(REG.namespace) + 1:]
             area, field = rel.split(".", 1)
             areas.setdefault(area, {})[field] = v
-        if self.sku is not None:
-            areas["SPC"]["SKU_Code"] = self.sku
         for area, fields in areas.items():
             if area not in self.silent:
                 stamp = round((now.timestamp() - self.clock_behind_s) * 1000)

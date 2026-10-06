@@ -16,10 +16,10 @@ from .db import uuid7
 
 
 def event_of(conn, event_id) -> dict | None:
-    """What a message about an event says about it: its kind, when it opened, its SKU and the rule it was judged by."""
+    """What a message about an event says about it: its kind, when it opened and the rule it was judged by."""
     if event_id is None:
         return None
-    return conn.execute("SELECT kind, opened_at, sku_code, rule FROM event WHERE id = %s", (event_id,)).fetchone()
+    return conn.execute("SELECT kind, opened_at, rule FROM event WHERE id = %s", (event_id,)).fetchone()
 
 
 def add_delivery(conn, n: dict, type_: str, channel: str, target: str, rule: str | None, now: datetime, *,

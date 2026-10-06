@@ -1,7 +1,7 @@
 import { TriangleAlert } from 'lucide-react'
 import { Fragment } from 'react'
 
-import type { MappingRow, RequiredTag, SkuPlace } from '@/types/configApi'
+import type { MappingRow, RequiredTag } from '@/types/configApi'
 
 import { groupTags } from './mappingModel'
 import { TopicText } from './TopicText'
@@ -10,13 +10,9 @@ import { TopicText } from './TopicText'
 export function MappingRowsTable({
   required,
   rows,
-  sku,
-  skuPlaceholder = null,
 }: {
   required: RequiredTag[]
   rows: MappingRow[]
-  sku: SkuPlace | null
-  skuPlaceholder?: string | null
 }) {
   const byTag = new Map(rows.map((r) => [r.tag, r]))
   return (
@@ -62,28 +58,6 @@ export function MappingRowsTable({
             })}
           </Fragment>
         ))}
-        <tr className="bg-surface-muted/50 border-line-soft border-b">
-          <td colSpan={3} className="py-1.5 pr-3 font-medium">
-            SKU
-          </td>
-        </tr>
-        <tr>
-          <td className="py-1.5 pr-3 pl-3">Running SKU</td>
-          {sku ? (
-            <>
-              <td className="px-2 py-1.5 font-mono text-[12px]">
-                <TopicText topic={sku.topic} />
-              </td>
-              <td className="px-2 py-1.5 font-mono text-[12px]">{sku.field}</td>
-            </>
-          ) : (
-            <td colSpan={2} className="text-warning px-2 py-1.5 text-[12px]">
-              {skuPlaceholder
-                ? `placeholder ${skuPlaceholder}: actual values only, until the edge team adds the field (O-15)`
-                : 'none yet: the edge team still has to add it (O-15)'}
-            </td>
-          )}
-        </tr>
       </tbody>
     </table>
   )

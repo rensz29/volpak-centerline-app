@@ -377,16 +377,6 @@ function MqttCheckResult({ check }: { check: MqttCheck }) {
           </ul>
         </details>
       )}
-      {(check.skuCandidates ?? []).length > 0 && (
-        <p className="text-[12px]">
-          SKU-like fields:{' '}
-          {(check.skuCandidates ?? []).map((s) => (
-            <span key={`${s.topic}.${s.field}`} className="font-mono">
-              {s.field}={s.value}{' '}
-            </span>
-          ))}
-        </p>
-      )}
     </div>
   )
 }

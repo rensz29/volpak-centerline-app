@@ -42,25 +42,22 @@ def coverage_errors(rows: list[dict], register) -> list[dict]:
                                          f"{'have' if len(missing) != 1 else 'has'} no place yet: {names}"}]
 
 
-def sku_view(sku: dict | None) -> dict:
-    """Where the SKU comes from, as the page reads it: the machine's field, or a placeholder (ADR-0022)."""
-    return {"sku": sku if sku and "topic" in sku else None, "skuPlaceholder": (sku or {}).get("placeholder")}
-
-
 class MappingStore:
     @staticmethod
     def active_number(conn) -> int | None:
         return MAPPINGS.active_number(conn)
 
     @staticmethod
-    def _content(conn, vid) -> tuple[list[dict], dict | None, bool]:
-        v = conn.execute("SELECT sku_topic, sku_field, sku_placeholder, sha256 FROM mapping_version WHERE id = %s",
-                         (vid,)).fetchone()
+    def _content(conn, vid) -> tuple[list[dict], bool]:
+        """A version's rows, and whether they still match its fingerprint. Versions saved before ADR-0027 may also
+        have recorded a SKU field or placeholder: it counts in their fingerprint, and nothing else reads it."""
+        v = conn.execute("""SELECT legacy_sku_topic, legacy_sku_field, legacy_sku_placeholder, sha256
+                              FROM mapping_version WHERE id = %s""", (vid,)).fetchone()
         rows = [dict(r) for r in conn.execute("SELECT tag, topic, field FROM tag_mapping WHERE mapping_version_id = %s ORDER BY tag",
                                                (vid,))]
-        sku = ({"topic": v["sku_topic"], "field": v["sku_field"]} if v["sku_topic"]
-               else {"placeholder": v["sku_placeholder"]} if v["sku_placeholder"] else None)
-        return rows, sku, v["sha256"] == mapping_mod.digest(rows, sku)
+        legacy = ({"topic": v["legacy_sku_topic"], "field": v["legacy_sku_field"]} if v["legacy_sku_topic"]
+                  else {"placeholder": v["legacy_sku_placeholder"]} if v["legacy_sku_placeholder"] else None)
+        return rows, v["sha256"] == mapping_mod.digest(rows, legacy)
 
     def overview(self, conn, register, subscriptions: list[str]) -> dict:
         versions = conn.execute("""SELECT v.id, v.number, v.created_at, v.reason, v.source, b.number AS based_on,
@@ -71,9 +68,9 @@ class MappingStore:
                                     ORDER BY v.number DESC""").fetchall()
         state = MAPPINGS.state(conn)
         active = state["active"]["number"] if state["active"] else None
-        coverage = sku = None
+        coverage = None
         if active is not None:
-            rows, sku, _ = self._content(conn, next(v["id"] for v in versions if v["number"] == active))
+            rows, _ = self._content(conn, next(v["id"] for v in versions if v["number"] == active))
             coverage = coverage_view(rows, register)
         return {
             "active": state["active"],
@@ -85,7 +82,6 @@ class MappingStore:
             "activations": state["activations"],
             "required": required_view(register),
             "coverage": coverage,
-            **sku_view(sku),
             "subscriptions": subscriptions,
         }
 
@@ -96,23 +92,19 @@ class MappingStore:
                               LEFT JOIN mapping_version b ON b.id = v.based_on_id WHERE v.number = %s""", (number,)).fetchone()
         if v is None:
             raise Problem(404, "not-found", "No such mapping version", f"Mapping v{number} doesn't exist")
-        rows, sku, intact = self._content(conn, v["id"])
-        _, warnings = mapping_mod.validate(rows, sku, register, subscriptions)
+        rows, intact = self._content(conn, v["id"])
+        _, warnings = mapping_mod.validate(rows, register, subscriptions)
         return {"number": v["number"], "createdAt": audit.iso(v["created_at"]), "reason": v["reason"], "source": v["source"],
                 "basedOn": v["based_on"], "registerVersion": v["register_version"], "intact": intact,
-                "rows": rows, **sku_view(sku), "coverage": coverage_view(rows, register), "warnings": warnings}
+                "rows": rows, "coverage": coverage_view(rows, register), "warnings": warnings}
 
     @staticmethod
-    def _from_body(body) -> tuple[list[dict], dict | None]:
-        rows = [{"tag": r.tag.strip(), "topic": r.topic, "field": (r.field or "").strip() or None} for r in body.rows]
-        sku = {"topic": body.sku.topic, "field": body.sku.field.strip()} if body.sku else None
-        if (body.sku_placeholder or "").strip():
-            sku = {**(sku or {}), "placeholder": body.sku_placeholder.strip()}  # with a field too, validate refuses it
-        return rows, sku
+    def _from_body(body) -> list[dict]:
+        return [{"tag": r.tag.strip(), "topic": r.topic, "field": (r.field or "").strip() or None} for r in body.rows]
 
     def check(self, body, register, subscriptions: list[str]) -> dict:
-        rows, sku = self._from_body(body)
-        errors, warnings = mapping_mod.validate(rows, sku, register, subscriptions)
+        rows = self._from_body(body)
+        errors, warnings = mapping_mod.validate(rows, register, subscriptions)
         return {"errors": errors, "warnings": warnings, "coverage": coverage_view(rows, register)}
 
     def create(self, conn, body, register, subscriptions: list[str]) -> int:
@@ -124,8 +116,8 @@ class MappingStore:
             raise Problem(409, "version-conflict", "The mappings changed meanwhile",
                           f"Mapping v{latest_n} was saved after you started. Reload the page and make your change again.",
                           currentVersion=latest_n)
-        rows, sku = self._from_body(body)
-        errors, _ = mapping_mod.validate(rows, sku, register, subscriptions)
+        rows = self._from_body(body)
+        errors, _ = mapping_mod.validate(rows, register, subscriptions)
         errors += reason_errors(body.reason)
         now = MAPPINGS.now(conn)
         if body.activate != "no":
@@ -142,21 +134,17 @@ class MappingStore:
 
         number, vid = (latest_n or 0) + 1, uuid7()
         reg = conn.execute("SELECT id FROM register_version ORDER BY seq DESC LIMIT 1").fetchone()
-        sha = mapping_mod.digest(rows, sku)
-        view = sku_view(sku)
-        place, placeholder = view["sku"], view["skuPlaceholder"]
-        conn.execute(f"""INSERT INTO mapping_version (id, number, based_on_id, register_version_id, sku_topic, sku_field,
-                                                      sku_placeholder, source, sha256, reason, created_by)
-                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, {audit.ACTOR})""",
-                     (vid, number, based_on["id"] if based_on else None, reg["id"], place["topic"] if place else None,
-                      place["field"] if place else None, placeholder, body.source.strip() or "by hand", sha,
+        sha = mapping_mod.digest(rows)
+        conn.execute(f"""INSERT INTO mapping_version (id, number, based_on_id, register_version_id, source, sha256, reason,
+                                                      created_by)
+                         VALUES (%s, %s, %s, %s, %s, %s, %s, {audit.ACTOR})""",
+                     (vid, number, based_on["id"] if based_on else None, reg["id"], body.source.strip() or "by hand", sha,
                       body.reason.strip()))
         with conn.cursor() as cur:
             cur.executemany("INSERT INTO tag_mapping (mapping_version_id, tag, topic, field) VALUES (%s, %s, %s, %s)",
                             [(vid, r["tag"], r["topic"], r["field"]) for r in rows])
         audit.record(conn, "mapping.version",
                      f"Mapping v{number} saved{f' from v{body.based_on}' if body.based_on else ''}: {len(rows)} tags"
-                     f"{', placeholder SKU ' + placeholder if placeholder else ', SKU field ' + place['field'] if place else ', no SKU field'}"
                      f" ({body.source.strip() or 'by hand'})",
                      body.reason, {"version": number, "based_on": body.based_on, "sha256": sha})
         if body.activate != "no":
@@ -166,7 +154,7 @@ class MappingStore:
 
     def activate(self, conn, number: int, body, register) -> None:
         def complete(conn, vid) -> list[dict]:
-            rows, _, intact = self._content(conn, vid)
+            rows, intact = self._content(conn, vid)
             problems = coverage_errors(rows, register)
             if not intact:
                 problems.append({"field": "at", "message": f"Mapping v{number} was changed outside Centerline; don't use it"})
@@ -190,12 +178,12 @@ class MappingStore:
             except (json.JSONDecodeError, AttributeError, KeyError, TypeError) as e:
                 raise invalid("That isn't a topic-map.json from tools/mqtt-probe",
                               [{"field": "content", "message": f"Not a probe topic map: {e}"}]) from None
-            return {"rows": rows, "sku": None, "ignored": ignored, "notSeen": not_seen, "problems": [],
+            return {"rows": rows, "ignored": ignored, "notSeen": not_seen, "problems": [],
                     "source": f"probe topic map {obj.get('generated', '')[:16]}".strip()}
-        rows, sku, problems = mapping_mod.from_csv(body.content)
-        return {"rows": rows, "sku": sku, "ignored": [], "notSeen": [], "problems": problems, "source": "CSV file"}
+        rows, problems = mapping_mod.from_csv(body.content)
+        return {"rows": rows, "ignored": [], "notSeen": [], "problems": problems, "source": "CSV file"}
 
     def export_csv(self, conn, number: int) -> str:
         vid = MAPPINGS.version_id(conn, number)
-        rows, sku, _ = self._content(conn, vid)
-        return mapping_mod.to_csv(rows, sku)
+        rows, _ = self._content(conn, vid)
+        return mapping_mod.to_csv(rows)

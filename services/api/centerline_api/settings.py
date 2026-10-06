@@ -10,6 +10,7 @@ database from deploy/dev/compose.yaml.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,7 +33,6 @@ class AnalyticsSettings:
     fetch_workers: int = 3  # windows fetched in parallel; kept low to be gentle on the historian
     min_window_s: int = 60
     good_quality_min: int = 192
-    ranges_csv: Path | None = None  # Analytics-valid ranges (ANA-10); None = none loaded
     clock_warning_s: float = 30.0  # warn when the Timebase clock differs by more than this
     visible_groups: int = 10  # ANA-17
 
@@ -88,8 +88,10 @@ def load_settings(path: str | Path | None = None) -> Settings:
 
     a = raw.get("analytics") or {}
     known = AnalyticsSettings.__dataclass_fields__
-    analytics = AnalyticsSettings(**{k: v for k, v in a.items() if k in known and k != "ranges_csv"},
-                                  ranges_csv=rel(a.get("ranges_csv")))
+    if a.get("ranges_csv"):  # before ADR-0029 the ranges were a file named here; now they're versions in the database
+        logging.getLogger("centerline.api").warning(
+            "analytics.ranges_csv is no longer read: an Administrator uploads the file on Configuration → Analytics ranges")
+    analytics = AnalyticsSettings(**{k: v for k, v in a.items() if k in known})
     au = raw.get("auth") or {}
     auth = AuthSettings(**{k: v for k, v in au.items() if k in AuthSettings.__dataclass_fields__
                            and k not in ("operator_workstations", "trusted_proxies")},

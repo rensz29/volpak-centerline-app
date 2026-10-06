@@ -160,7 +160,7 @@ export function ActivateDialog({
   )
 }
 
-/** Asks for a reason, then runs the action (cancel a schedule, remove a SKU). */
+/** Asks for a reason, then runs the action (e.g. cancel a scheduled switch). */
 export function ReasonDialog({
   title,
   description,

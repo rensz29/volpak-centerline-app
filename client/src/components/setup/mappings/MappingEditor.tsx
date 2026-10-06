@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ApiProblem } from '@/services/http'
 import { configApi } from '@/services/configApi'
-import type { MappingCheck, MappingDiscovery, MappingDraft, MappingRow, MappingsOverview, SkuPlace } from '@/types/configApi'
+import type { MappingCheck, MappingDiscovery, MappingDraft, MappingRow, MappingsOverview } from '@/types/configApi'
 import { cn } from '@/utils/cn'
 import { fromManilaInput, toUtcIso } from '@/utils/manilaTime'
 
@@ -22,8 +22,6 @@ export interface MappingBase {
   number: number | null
   source: string
   rows: MappingRow[]
-  sku: SkuPlace | null
-  skuPlaceholder: string | null
 }
 
 const LISTEN_S = 10
@@ -42,8 +40,6 @@ export function MappingEditor({
 }) {
   const required = overview.required
   const [places, setPlaces] = useState<Record<string, Place>>(() => placesFrom(base.rows))
-  const [sku, setSku] = useState<Place>(() => base.sku ?? { topic: '', field: '' })
-  const [placeholder, setPlaceholder] = useState(base.skuPlaceholder ?? '')
   const [source, setSource] = useState(base.source)
   const [reason, setReason] = useState('')
   const [activate, setActivate] = useState<MappingDraft['activate']>('no')
@@ -57,9 +53,6 @@ export function MappingEditor({
   const fileInput = useRef<HTMLInputElement>(null)
 
   const rows = useMemo(() => rowsFrom(places, required), [places, required])
-  const skuPlace = useMemo<SkuPlace | null>(() => (sku.topic.trim() || sku.field.trim() ? { topic: sku.topic, field: sku.field } : null), [sku])
-  // The machine's SKU field, once mapped, replaces the placeholder (ADR-0022)
-  const skuPlaceholder = skuPlace ? null : placeholder.trim() || null
   const dropped = base.rows.filter((r) => !required.some((q) => q.tag === r.tag))
   const fieldsOn = useMemo(() => discovery?.fields ?? {}, [discovery])
   const fieldLists = Object.keys(fieldsOn)
@@ -68,16 +61,14 @@ export function MappingEditor({
     const suggested = new Set(suggestTopics(overview.subscriptions, required))
     const used = new Map<string, number>()
     for (const r of rows) used.set(r.topic, (used.get(r.topic) ?? 0) + 1)
-    const all = new Set([...used.keys(), ...heard, ...suggested, ...(sku.topic.trim() ? [sku.topic] : [])])
+    const all = new Set([...used.keys(), ...heard, ...suggested])
     return [...all].sort().map((topic) => ({ topic, heard: heard.has(topic), suggested: suggested.has(topic), used: used.get(topic) ?? 0 }))
-  }, [rows, discovery, overview.subscriptions, required, sku.topic])
+  }, [rows, discovery, overview.subscriptions, required])
 
   const draftOf = (extra: Partial<MappingDraft> = {}): MappingDraft => ({
     expectedLatest: overview.latest,
     basedOn: base.number,
     rows,
-    sku: skuPlace,
-    skuPlaceholder,
     source,
     reason: '',
     activate: 'no',
@@ -91,7 +82,7 @@ export function MappingEditor({
     const timer = window.setTimeout(() => {
       configApi
         .checkMapping(
-          { expectedLatest: overview.latest, basedOn: base.number, rows, sku: skuPlace, skuPlaceholder, source, reason: '', activate: 'no', activateAt: null },
+          { expectedLatest: overview.latest, basedOn: base.number, rows, source, reason: '', activate: 'no', activateAt: null },
           controller.signal,
         )
         .then(setCheck)
@@ -101,15 +92,13 @@ export function MappingEditor({
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [rows, skuPlace, skuPlaceholder, source, overview.latest, base.number])
+  }, [rows, source, overview.latest, base.number])
 
   const errors = problem?.fieldErrors.length ? problem.fieldErrors : (check?.errors ?? [])
   const errorAt = (tag: string, field: 'topic' | 'field' | 'tag') => {
     const i = rows.findIndex((r) => r.tag === tag)
     return i < 0 ? undefined : errors.find((e) => e.field === `rows[${i}].${field}`)?.message
   }
-  const skuError = (field: 'topic' | 'field') => errors.find((e) => e.field === `sku.${field}`)?.message
-  const placeholderError = errors.find((e) => e.field === 'skuPlaceholder')?.message
   const coverage = check?.coverage
   const complete = coverage !== undefined && coverage.missing.length === 0
 
@@ -154,7 +143,6 @@ export function MappingEditor({
       const format = file.name.toLowerCase().endsWith('.csv') ? 'csv' : 'topic-map'
       const got = await configApi.importMapping(format, text)
       setPlaces(placesFrom(got.rows))
-      if (got.sku) setSku({ topic: got.sku.topic, field: got.sku.field })
       setSource(got.source || file.name)
       setNote(
         [
@@ -325,81 +313,6 @@ export function MappingEditor({
             needs: {dropped.map((r) => r.tag).join(', ')}.
           </p>
         )}
-      </SectionCard>
-
-      <SectionCard
-        title="SKU"
-        description="Where the running SKU arrives (O-15). Without it or a placeholder, monitoring of the real machine pauses (OPC-08)."
-        icon={Tag}
-      >
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_280px]">
-          <FormField label="Topic" error={skuError('topic')}>
-            <TopicPicker
-              value={sku.topic}
-              onChange={(topic) => setSku((s) => ({ ...s, topic }))}
-              options={topicOptions}
-              label="SKU topic"
-              invalid={Boolean(skuError('topic'))}
-            />
-          </FormField>
-          <FormField label="Field" error={skuError('field')}>
-            <Input
-              list={fieldListFor(sku.topic)}
-              value={sku.field}
-              onChange={(e) => setSku((s) => ({ ...s, field: e.target.value }))}
-              placeholder="e.g. SKU_Code"
-              className="h-8 font-mono text-[12px]"
-              aria-label="SKU field"
-            />
-          </FormField>
-        </div>
-        {discovery && (
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px]">
-            {discovery.skuCandidates?.length ? (
-              <>
-                <span className="text-ink-soft">SKU-like fields heard:</span>
-                {discovery.skuCandidates.map((c) => (
-                  <Button
-                    key={c.topic + c.field}
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSku({ topic: c.topic, field: c.field })}
-                  >
-                    {c.field} = {c.value}
-                  </Button>
-                ))}
-              </>
-            ) : (
-              <span className="text-ink-soft">No SKU-like field heard on the broker: the edge team still has to add it.</span>
-            )}
-          </div>
-        )}
-        {skuPlace && (
-          <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setSku({ topic: '', field: '' })}>
-            Clear the SKU field
-          </Button>
-        )}
-        <div className="border-line-soft mt-4 border-t pt-3">
-          <FormField
-            label="Placeholder SKU, until the machine publishes one"
-            error={placeholderError}
-            hint={
-              skuPlace
-                ? 'Not used: the SKU field above replaces it.'
-                : 'Judged on actual values only: Warning and Critical against each setpoint. HMI mismatch waits for the SKU field and its targets (ADR-0022).'
-            }
-          >
-            <Input
-              value={placeholder}
-              onChange={(e) => setPlaceholder(e.target.value)}
-              disabled={Boolean(skuPlace)}
-              placeholder="e.g. PLACEHOLDER"
-              className="h-8 max-w-[280px] font-mono text-[12px]"
-              aria-label="Placeholder SKU"
-            />
-          </FormField>
-        </div>
       </SectionCard>
 
       <SectionCard title="Save" description="A new version, kept for good; the one in effect stays until you activate another" icon={Save}>

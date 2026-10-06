@@ -1,14 +1,9 @@
 {
-  "sku": {
-    "tag": null,
-    "note": "Decided in ADR-0007: the edge/UNS team adds the running SKU/recipe to the machine's MQTT payload. Until then monitoring pauses on the real machine (OPC-08); development uses tools/mqtt-sim.",
-    "status": "awaiting_tag"
-  },
   "line": {
     "id": "VOLPAK-FILLER",
     "name": "Volpak Filler, Dressings Halal"
   },
-  "version": "2026-09-30.2",
+  "version": "2026-10-05.1",
   "$comment": [
     "Parameter register: the single source of truth for what Centerline monitors (ADR-0007).",
     "Parameters keep their URS IDs (P01-P11). A parameter has one or more zones; each zone is a",
@@ -212,8 +207,8 @@
         {
           "id": "FILM_REEL",
           "name": "Film Reel",
-          "setpoint": null,
-          "actual": "SPC.Film_Reel"
+          "actual": "SPC.Film_Reel",
+          "setpoint": null
         }
       ],
       "status": "analytics_only",

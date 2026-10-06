@@ -93,7 +93,6 @@ class Register:
     path: Path | None  # the file it came from; None when it came from the database (ADR-0012)
     version: str
     namespace: str
-    sku_tag: str | None
     context: dict[str, str]
     parameters: list[dict]
     zones: list[Zone] = field(default_factory=list)
@@ -103,8 +102,7 @@ class Register:
         return f"{self.namespace}.{rel}"
 
     def monitored_tags(self) -> list[str]:
-        tags = [t for z in self.zones for t in (z.setpoint, z.actual)]
-        return tags + ([self.sku_tag] if self.sku_tag else [])
+        return [t for z in self.zones for t in (z.setpoint, z.actual)]
 
     def candidate_tags(self) -> list[tuple[str, str]]:
         """(label, full tag) for tags named in the register but not yet monitored."""
@@ -148,7 +146,6 @@ def parse(raw: dict, path: Path | None = None) -> Register:
         path=path,
         version=raw.get("version", ""),
         namespace=ns,
-        sku_tag=f"{ns}.{raw['sku']['tag']}" if (raw.get("sku") or {}).get("tag") else None,
         context={k: f"{ns}.{v}" for k, v in (raw.get("context_tags") or {}).items()},
         parameters=raw["parameters"],
     )

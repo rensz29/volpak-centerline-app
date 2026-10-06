@@ -23,6 +23,7 @@ import psycopg
 from centerline_common import connections, roles
 from centerline_common.channels import Email, Outcome, Teams
 from centerline_common.db import REPO, DatabaseConfig, DatabaseUnavailable
+from centerline_common.isotime import iso
 
 from . import store
 
@@ -104,7 +105,7 @@ class Service:
                         status = store.finish(conn, d, name, outcome, started, self.clock())
                         with self.lock:
                             self.lanes[name]["lastOk" if outcome.ok else "lastError"] = (
-                                started.isoformat() if outcome.ok else {"at": started.isoformat(), "error": outcome.response})
+                                iso(started) if outcome.ok else {"at": iso(started), "error": outcome.response})
                         log.info("%s to %s, attempt %d: %s (%s)", name, d["target"], d["attempt"], status, outcome.response)
                     continue  # more may be due
             except FAILURES as e:

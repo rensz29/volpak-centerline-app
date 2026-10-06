@@ -9,10 +9,11 @@ caller names one. Nothing secret goes in.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from centerline_common.db import uuid7
+from centerline_common import isotime
 from psycopg.types.json import Jsonb
 
 LEGACY = Path("history") / "audit.jsonl"  # where the Configuration page kept its history before ADR-0012
@@ -21,7 +22,7 @@ ACTOR = "nullif(current_setting('centerline.actor', true), '')"
 
 
 def iso(t: datetime | None) -> str | None:
-    return None if t is None else t.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return isotime.iso(t, "seconds")
 
 
 def record(conn, action: str, summary: str, reason: str | None = None, details: dict | None = None,

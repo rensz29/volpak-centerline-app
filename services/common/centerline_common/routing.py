@@ -20,7 +20,6 @@ TYPES = {
     "critical_repeat": "Critical reminder (every 15 min)",
     "critical_escalation": "Critical escalation (75 min)",
     "recovery": "Back to normal",
-    "changeover": "SKU changeover",
     "reason_overdue": "Reason overdue (15 min)",
     "system": "System alert",
 }
@@ -32,7 +31,7 @@ MAX_RULES, MAX_TARGETS = 50, 50
 
 _INITIAL = {"HMI mismatch": "hmi_mismatch", "Actual Warning": "actual_warning", "Actual Critical": "actual_critical"}
 _KINDS = {"escalated": "actual_critical", "critical_repeat": "critical_repeat", "critical_escalation": "critical_escalation",
-          "recovery": "recovery", "superseded": "hmi_mismatch", "changeover": "changeover", "system": "system", "test": "test",
+          "recovery": "recovery", "superseded": "hmi_mismatch", "system": "system", "test": "test",
           "workflow_escalation": "reason_overdue"}
 
 

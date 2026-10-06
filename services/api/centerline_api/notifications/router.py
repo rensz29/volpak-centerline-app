@@ -8,11 +8,10 @@ before the routing uses it.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from centerline_common import connections, messages
+from centerline_common import connections, isotime, messages
 from centerline_common import routing as routing_mod
 from centerline_common.db import uuid7
 from centerline_common.outbox import add_delivery, event_of
@@ -90,7 +89,7 @@ def list_notifications(state: Literal["all", "waiting", "failed", "unrouted", "t
         try:
             at, nid = before.split("|", 1)
             clauses.append("(n.created_at, n.id) < (%s, %s)")
-            args += [datetime.fromisoformat(at), UUID(nid)]
+            args += [isotime.parse(at), UUID(nid)]
         except ValueError:
             raise Problem(422, "invalid-cursor", "Invalid page cursor", "Use the `next` value of the previous page") from None
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -105,7 +104,7 @@ def list_notifications(state: Literal["all", "waiting", "failed", "unrouted", "t
                                count(*) FILTER (WHERE status = 'PERMANENT_FAILURE') AS failed FROM notification_delivery""").fetchone()
     last = rows[-1] if len(rows) == limit else None
     return {"notifications": [_summary(r, by_n.get(r["id"], [])) for r in rows],
-            "next": f"{last['created_at'].isoformat()}|{last['id']}" if last else None,
+            "next": f"{isotime.iso(last['created_at'])}|{last['id']}" if last else None,
             "counts": {"waiting": c["waiting"], "failed": c["failed"]}}
 
 

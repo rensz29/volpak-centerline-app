@@ -15,47 +15,54 @@ DEFAULTS = {"mismatch_delay_s": 30, "warning_delay_s": 30, "critical_delay_s": 1
             "brief_change_mode": "lightweight", "warning_notifications": True}
 
 
-def row(parameter_id, zone_id=None, sku=None, **fields):
-    return {"sku": sku, "parameter_id": parameter_id, "zone_id": zone_id, **{f: fields.get(f) for f in rules.FIELDS}}
+def row(parameter_id, zone_id=None, **fields):
+    return {"parameter_id": parameter_id, "zone_id": zone_id, **{f: fields.get(f) for f in rules.FIELDS}}
 
 
-def test_the_most_specific_row_wins_field_by_field():
+def test_the_zones_row_wins_over_the_parameters_field_by_field():
     rs = [row("P02", warn_low=2, warn_high=1, crit_low=4, crit_high=2, mismatch_delay_s=45),
-          row("P02", "V3", warn_low=3),
-          row("P02", sku="A", target=180, crit_low=6),
-          row("P02", "V3", sku="A", target=182)]
-    v3 = rules.resolve(rs, DEFAULTS, "P02", "V3", "A")
-    assert (v3["target"].value, v3["target"].layer) == (182, "sku_zone")
-    assert (v3["crit_low"].value, v3["crit_low"].layer) == (6, "sku")
+          row("P02", "V3", warn_low=3, target=182)]
+    v3 = rules.resolve(rs, DEFAULTS, "P02", "V3")
+    assert (v3["target"].value, v3["target"].layer) == (182, "zone")
     assert (v3["warn_low"].value, v3["warn_low"].layer) == (3, "zone")
     assert (v3["warn_high"].value, v3["warn_high"].layer) == (1, "parameter")
     assert (v3["mismatch_delay_s"].value, v3["mismatch_delay_s"].layer) == (45, "parameter")
     assert (v3["recovery_delay_s"].value, v3["recovery_delay_s"].layer) == (15, "default")
-    other = rules.resolve(rs, DEFAULTS, "P02", "V1", "B")  # an SKU without rows of its own
-    assert other["target"].value is None and other["warn_low"].value == 2 and other["crit_low"].value == 4
+    v1 = rules.resolve(rs, DEFAULTS, "P02", "V1")  # no row of its own
+    assert v1["target"].value is None and v1["warn_low"].value == 2 and v1["crit_low"].value == 4
 
 
-def test_readiness_lists_zones_without_a_target_or_limits():
-    rs = [row("P02", warn_low=2, warn_high=1, crit_low=4, crit_high=2), row("P02", sku="A", target=180)]
-    ready = rules.readiness(rs, DEFAULTS, ZONES, ["A", "B"])
-    assert {g["zone_id"] for g in ready["A"]} == {"FRONT", "REAR"}  # P04 has no limits or targets yet
-    assert all(set(g["missing"]) == {"target", *rules.LIMITS} for g in ready["A"])
-    assert len(ready["B"]) == len(ZONES) and ready["B"][0]["missing"] == ["target"]  # P02 limits apply to every SKU
+def test_rows_saved_for_a_sku_before_adr_0027_judge_nothing_and_carry_over_to_the_zones():
+    rs = [row("P02", warn_low=2, warn_high=1, crit_low=4, crit_high=2),
+          {**row("P02", "V1", target=220), "sku": "12345"}, {**row("P02", "V2", target=215), "sku": "12345"}]
+    assert rules.resolve(rs, DEFAULTS, "P02", "V1")["target"].value is None
+    carried, sku = rules.carry_over(rs)
+    assert sku == "12345" and all("sku" not in r for r in carried)
+    assert {(r["zone_id"], r["target"]) for r in carried if r["zone_id"]} == {("V1", 220), ("V2", 215)}
+    assert rules.carry_over([row("P02", warn_low=2)]) == ([row("P02", warn_low=2)], None)  # nothing to carry
+
+
+def test_readiness_lists_what_each_zone_lacks_and_limits_alone_let_the_line_be_judged():
+    rs = [row("P02", warn_low=2, warn_high=1, crit_low=4, crit_high=2), row("P02", "V1", target=220)]
+    gaps = rules.readiness(rs, DEFAULTS, ZONES)
+    by_zone = {(g["parameter_id"], g["zone_id"]): g["missing"] for g in gaps}
+    assert ("P02", "V1") not in by_zone and by_zone[("P02", "V2")] == ["target"]  # judged, HMI not
+    assert set(by_zone[("P04", "FRONT")]) == {"target", *rules.LIMITS}  # P04 has no limits yet: the line waits
+    assert not rules.limits_complete(rs, DEFAULTS, ZONES)
+    assert rules.limits_complete(rs + [row("P04", warn_low=10, warn_high=9, crit_low=20, crit_high=18)], DEFAULTS, ZONES)
 
 
 def test_validation_names_the_row_and_field():
     rs = [row("P02", warn_low=2, warn_high=1, crit_low=4, crit_high=2),
-          row("P02", sku="A", warn_low=5),  # combined with the parameter's crit_low 4: Critical inside Warning
+          row("P02", "V1", warn_low=5),  # combined with the parameter's crit_low 4: Critical inside Warning
           row("P08", warn_low=1),  # analytics only, not monitored
           row("P04", "NOPE", warn_low=1),
-          row("P02", sku="ZZZ", target=1),
           row("P02", warn_low=1)]  # repeats row 1's scope
-    errors = {e["field"]: e["message"] for e in rules.validate(rs, DEFAULTS, ZONES, {"A"})}
+    errors = {e["field"]: e["message"] for e in rules.validate(rs, DEFAULTS, ZONES)}
     assert "Critical below (4) must be at least Warning below (5)" in errors["rules[1].warnLow"]
     assert "isn't monitored" in errors["rules[2].parameterId"]
     assert "no monitored zone NOPE" in errors["rules[3].zoneId"]
-    assert "ZZZ" in errors["rules[4].sku"]
-    assert "repeats row 1" in errors["rules[5]"]
+    assert "repeats row 1" in errors["rules[4]"]
 
 
 def test_the_hash_ignores_row_order_and_number_spelling():

@@ -1,4 +1,4 @@
-import { CalendarClock, CheckCircle2, CloudOff, FilePlus2, History, ListChecks, Loader2, Pencil, Plus, Trash2, TriangleAlert, Undo2, Zap } from 'lucide-react'
+import { CalendarClock, CloudOff, FilePlus2, History, Loader2, Undo2, Zap } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -10,11 +10,11 @@ import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, Dia
 import { Skeleton } from '@/components/ui/skeleton'
 import { ApiProblem } from '@/services/http'
 import { configApi } from '@/services/configApi'
-import type { LatestValue, RegisterView, RulesOverview, RulesVersion, RulesVersionStatus, Sku } from '@/types/configApi'
+import type { LatestValue, RegisterView, RulesOverview, RulesVersion, RulesVersionStatus } from '@/types/configApi'
 import { formatManilaFull } from '@/utils/manilaTime'
 
 import { ActivateDialog, ReasonDialog } from '../VersionDialogs'
-import { RulesReadiness, SkuDialog } from './RuleDialogs'
+import { RulesReadiness } from './RuleDialogs'
 import { RulesEditor, type EditorBase } from './RulesEditor'
 import { RulesSummary } from './RulesSummary'
 import { STATUS_LABELS, normalizeRows } from './ruleModel'
@@ -29,7 +29,7 @@ const STATUS_VARIANT: Record<RulesVersionStatus, 'normal' | 'warning' | 'neutral
 const when = (iso: string) => `${formatManilaFull(Date.parse(iso))} Manila`
 
 /**
- * Monitoring rules (ADR-0012): targets per SKU and zone, Warning/Critical limits and
+ * Monitoring rules (ADR-0012, ADR-0027): a target per zone, Warning/Critical limits and
  * delays, versioned. A saved version never changes; it takes effect when activated.
  */
 export function RulesTab({
@@ -50,8 +50,6 @@ export function RulesTab({
   const [viewing, setViewing] = useState<RulesVersion | null>(null)
   const [activating, setActivating] = useState<number | null>(null)
   const [cancelling, setCancelling] = useState<RulesOverview['scheduled'][number] | null>(null)
-  const [skuDialog, setSkuDialog] = useState<{ sku: Sku | null } | null>(null)
-  const [removing, setRemoving] = useState<Sku | null>(null)
 
   const show = useCallback((next: RulesOverview) => {
     setOverview(next)
@@ -80,7 +78,12 @@ export function RulesTab({
         setEditing({ number: null, source: `the ${proposal.source}`, settings: proposal.settings, rules: normalizeRows(proposal.rules) })
       } else {
         const v = await configApi.rulesVersion(number)
-        setEditing({ number, source: `Rules v${number}`, settings: v.settings, rules: v.rules })
+        // Saved for a product code before ADR-0027: its targets become the zones' own
+        setEditing(
+          v.carryOver
+            ? { number, source: `Rules v${number}, with the targets it had for ${v.carryOver.from}`, settings: v.settings, rules: v.carryOver.rules }
+            : { number, source: `Rules v${number}`, settings: v.settings, rules: v.rules },
+        )
       }
     } catch (caught) {
       toast.error("Couldn't open the rules", { description: caught instanceof Error ? caught.message : String(caught) })
@@ -107,7 +110,6 @@ export function RulesTab({
         register={register}
         latest={latest}
         onCancel={() => setEditing(null)}
-        onOverview={show}
         onSaved={(next) => {
           setEditing(null)
           show(next)
@@ -115,8 +117,6 @@ export function RulesTab({
       />
     )
   }
-
-  const ready = overview.skus.filter((s) => (overview.readiness[s.code] ?? []).length === 0)
 
   return (
     <div className="flex flex-col gap-4">
@@ -148,14 +148,14 @@ export function RulesTab({
               <span className="text-ink">since {when(overview.active.since)}</span>
               <span className="text-ink-soft"> · “{overview.active.reason}”{overview.active.by && ` · by ${overview.active.by}`}</span>
             </p>
-            {active ? <RulesSummary version={active} register={register} skus={overview.skus} /> : <Skeleton className="h-40 w-full" />}
+            {active ? <RulesSummary version={active} register={register} /> : <Skeleton className="h-40 w-full" />}
           </div>
         ) : (
           <div className="text-[13px]">
             <p className="text-ink font-medium">No rules are in effect yet.</p>
             <p className="text-ink-soft mt-1 max-w-3xl">
               {overview.latest === null
-                ? 'Start from the Phase 0 proposal: the delays accepted in ADR-0002, the limits proposed from 28 days of Timebase history and the stop pause from ADR-0010. Review it, add the SKUs and their targets, save it, then activate it. With a placeholder SKU on the Mappings tab, it can go into effect without SKUs: the line is then judged on actual values. Add the placeholder code to the SKU list and give it targets to judge the HMI setpoints too (ADR-0022).'
+                ? 'Start from the Phase 0 proposal: the delays accepted in ADR-0002, the limits proposed from 28 days of Timebase history and the stop pause from ADR-0010. Review it, give each zone its target from the centerline sheet, save it, then activate it. A zone without a target has only its actual value judged (ADR-0027).'
                 : 'A version is saved but not active. Activate it from the list below when its delays and limits are accepted.'}
             </p>
           </div>
@@ -176,69 +176,6 @@ export function RulesTab({
               </li>
             ))}
           </ul>
-        )}
-      </SectionCard>
-
-      <SectionCard
-        title="SKUs"
-        description={
-          overview.active
-            ? `${ready.length} of ${overview.skus.length} ready under Rules v${overview.active.number}. A SKU that isn't ready pauses monitoring while it runs (OPC-08).`
-            : 'The SKU codes the machine publishes (O-15). Targets are set per SKU in a rules version.'
-        }
-        icon={ListChecks}
-        actions={
-          canEdit ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => setSkuDialog({ sku: null })}>
-              <Plus className="size-3.5" aria-hidden /> Add SKU
-            </Button>
-          ) : undefined
-        }
-        flush
-      >
-        {overview.skus.length === 0 ? (
-          <p className="text-ink-soft px-5 py-4 text-[13px]">
-            No SKUs yet. Process engineering has the list and each SKU's target per zone (their centerline sheets).
-          </p>
-        ) : (
-          <table className="w-full text-[13px]">
-            <tbody>
-              {overview.skus.map((s) => {
-                const gaps = overview.readiness[s.code]
-                return (
-                  <tr key={s.code} className="border-line-soft border-b">
-                    <td className="w-[160px] px-5 py-2 font-mono">{s.code}</td>
-                    <td className="text-ink px-3 py-2">{s.name}</td>
-                    <td className="px-3 py-2">
-                      {!overview.active ? (
-                        <span className="text-ink-muted text-[12px]">no rules in effect</span>
-                      ) : gaps && gaps.length === 0 ? (
-                        <span className="text-normal inline-flex items-center gap-1 text-[12px]">
-                          <CheckCircle2 className="size-3.5" aria-hidden /> ready
-                        </span>
-                      ) : (
-                        <span className="text-warning inline-flex items-center gap-1 text-[12px]">
-                          <TriangleAlert className="size-3.5" aria-hidden /> {gaps?.length ?? 0} zone(s) without a target or limits
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      {canEdit && (
-                        <>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => setSkuDialog({ sku: s })}>
-                            <Pencil className="size-3.5" aria-hidden /> Rename
-                          </Button>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => setRemoving(s)}>
-                            <Trash2 className="size-3.5" aria-hidden /> Remove
-                          </Button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
         )}
       </SectionCard>
 
@@ -312,7 +249,7 @@ export function RulesTab({
               </DialogDescription>
             </DialogHeader>
             <DialogBody>
-              <RulesSummary version={viewing} register={register} skus={overview.skus} />
+              <RulesSummary version={viewing} register={register} />
             </DialogBody>
           </DialogContent>
         </Dialog>
@@ -344,30 +281,6 @@ export function RulesTab({
           onConfirm={async (reason) => {
             show(await configApi.cancelActivation(cancelling.id, reason))
             setCancelling(null)
-          }}
-        />
-      )}
-      {skuDialog && (
-        <SkuDialog
-          sku={skuDialog.sku}
-          onClose={() => setSkuDialog(null)}
-          onSaved={(next) => {
-            setSkuDialog(null)
-            show(next)
-          }}
-        />
-      )}
-      {removing && (
-        <ReasonDialog
-          title={`Remove SKU ${removing.code}`}
-          description="Only a SKU that no saved version uses can be removed, e.g. one added with a typo."
-          confirm="Remove"
-          destructive
-          required={false}
-          onClose={() => setRemoving(null)}
-          onConfirm={async (reason) => {
-            show(await configApi.deleteSku(removing.code, reason))
-            setRemoving(null)
           }}
         />
       )}

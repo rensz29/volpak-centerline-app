@@ -91,14 +91,6 @@ export const configApi = {
     return request<RulesOverview>(`/api/v1/config/activations/${encodeURIComponent(id)}/cancel`, json('POST', { reason }))
   },
 
-  addSku(code: string, name: string, reason: string): Promise<RulesOverview> {
-    return request<RulesOverview>('/api/v1/config/skus', json('POST', { code, name, reason }))
-  },
-
-  renameSku(code: string, name: string, reason: string): Promise<RulesOverview> {
-    return request<RulesOverview>(`/api/v1/config/skus/${encodeURIComponent(code)}`, json('PUT', { name, reason }))
-  },
-
   // Tag mappings (ADR-0013)
 
   mappings(): Promise<MappingsOverview> {
@@ -135,12 +127,6 @@ export const configApi = {
 
   discoverMapping(seconds: number): Promise<MappingDiscovery> {
     return request<MappingDiscovery>('/api/v1/config/mappings/discover', json('POST', { seconds }))
-  },
-
-  deleteSku(code: string, reason: string): Promise<RulesOverview> {
-    return request<RulesOverview>(`/api/v1/config/skus/${encodeURIComponent(code)}?reason=${encodeURIComponent(reason)}`, {
-      method: 'DELETE',
-    })
   },
 }
 

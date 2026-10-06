@@ -39,7 +39,6 @@ class OpenEvent:
     event_id: UUID
     kind: str  # HMI_MISMATCH | ACTUAL
     zone: ZoneRef
-    sku: str
     at: datetime
     versions: Versions
     rule: dict  # the resolved rule, pinned until the event closes
@@ -53,7 +52,7 @@ class OpenEvent:
 @dataclass(frozen=True)
 class Transition:
     event_id: UUID
-    state: str  # OPEN, WARNING, CRITICAL, RESOLVED, SUPERSEDED, CLOSED_SKU_CHANGEOVER, ACKNOWLEDGED
+    state: str  # OPEN, WARNING, CRITICAL, RESOLVED, SUPERSEDED, CLOSED_MONITORING_DISABLED, ACKNOWLEDGED
     at: datetime
     inputs: dict = field(default_factory=dict)
     severity: str | None = None
@@ -67,7 +66,6 @@ class BriefChange:
 
     id: UUID
     zone: ZoneRef
-    sku: str
     mode: str  # lightweight | cleared_before_trigger
     started_at: datetime
     ended_at: datetime

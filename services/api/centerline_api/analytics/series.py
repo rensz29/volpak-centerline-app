@@ -18,7 +18,7 @@ from centerline_common.historian import UNREADABLE_Q, Sample
 
 @dataclass
 class Exclusions:
-    samples: int = 0  # samples that affect the range, including the carry-in
+    samples: int = 0  # samples in force for some part of the range, the carry-in included
     bad_quality: int = 0
     null: int = 0
     non_numeric: int = 0
@@ -86,16 +86,17 @@ def build_series(samples: list[Sample], lo: float, hi: float, *, good_min: int =
         b = min(times[i + 1] if i + 1 < len(pts) else hi, hi)
         if a >= hi:
             break
+        if b <= a:
+            continue  # superseded right at the start (a sample exactly at `lo`): never in force, so not counted
         if pts[i].q == UNREADABLE_Q:
             v = math.nan
             ex.unreadable_s += max(0.0, b - a)
         else:
             ex.samples += 1
             v = _classify(pts[i], good_min, valid, ex)
-        if b > a:
-            starts.append(a)
-            ends.append(b)
-            vals.append(v)
+        starts.append(a)
+        ends.append(b)
+        vals.append(v)
     return StepSeries(np.array(starts, float), np.array(ends, float), np.array(vals, float)), ex
 
 

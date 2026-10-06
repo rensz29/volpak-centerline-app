@@ -3,7 +3,8 @@
 - **Status:** Accepted, except decision 3 (M7), which waits for the owner. Decision 1 amended by
   [ADR-0022](ADR-0022-placeholder-sku.md) the same day: under a placeholder SKU, the real machine's actual values are judged.
   Amended by [ADR-0026](ADR-0026-real-app-on-the-real-machine.md) on 2026-10-02: G0b no longer gates the real application on
-  the development laptop, only the control-room PC
+  the development laptop, only the control-room PC. Decision 1 amended by [ADR-0027](ADR-0027-no-sku.md) (2026-10-05): the SKU field
+  isn't deferred but dropped
 - **Date:** 2026-10-01
 - **Decider:** Szyrelle (system owner)
 - **Amends:** [ADR-0005](ADR-0005-split-gate-g0.md) (what G0b needs) and [ADR-0006](ADR-0006-mqtt-acquisition.md)

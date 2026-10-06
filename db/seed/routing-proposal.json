@@ -4,15 +4,37 @@
   "rules": [
     {
       "name": "Management on Teams",
-      "types": ["hmi_mismatch", "actual_warning", "actual_critical", "critical_repeat", "critical_escalation", "recovery", "changeover", "reason_overdue", "system"],
+      "types": [
+        "hmi_mismatch",
+        "actual_warning",
+        "actual_critical",
+        "critical_repeat",
+        "critical_escalation",
+        "recovery",
+        "reason_overdue",
+        "system"
+      ],
       "channel": "teams",
-      "targets": ["Centerline alerts (placeholder channel)"]
+      "targets": [
+        "Centerline alerts (placeholder channel)"
+      ]
     },
     {
       "name": "Management by email",
-      "types": ["hmi_mismatch", "actual_warning", "actual_critical", "critical_repeat", "critical_escalation", "recovery", "changeover", "reason_overdue", "system"],
+      "types": [
+        "hmi_mismatch",
+        "actual_warning",
+        "actual_critical",
+        "critical_repeat",
+        "critical_escalation",
+        "recovery",
+        "reason_overdue",
+        "system"
+      ],
       "channel": "email",
-      "targets": ["management@example.invalid"]
+      "targets": [
+        "management@example.invalid"
+      ]
     }
   ]
 }

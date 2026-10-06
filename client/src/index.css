@@ -75,7 +75,7 @@
   --color-series-tolerance: #fca5a5;
   --color-series-alarm: #dc2626;
 
-  /* --- Qualitative ramp for SKU categories (grayscale-separable) --------- */
+  /* --- Qualitative ramp for groups, e.g. by shift (grayscale-separable) -- */
   --color-cat-1: #2563eb;
   --color-cat-2: #7c3aed;
   --color-cat-3: #0891b2;

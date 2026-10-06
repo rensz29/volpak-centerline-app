@@ -10,7 +10,7 @@ export const STATUS_LABEL: Record<RequestStatus, string> = {
   not_answered: 'Not answered: its shift ended',
   resolved: 'Closed: back on target',
   superseded: 'Closed: a newer mismatch replaced it',
-  cancelled: 'Closed: SKU changeover or zone switched off',
+  cancelled: 'Closed: the zone was switched off',
 }
 
 export const STATUS_TONE: Record<RequestStatus, 'warning' | 'normal' | 'neutral' | 'critical' | 'outline'> = {

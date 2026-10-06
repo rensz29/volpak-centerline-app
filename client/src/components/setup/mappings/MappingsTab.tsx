@@ -55,10 +55,10 @@ export function MappingsTab({ canEdit = true }: { canEdit?: boolean }) {
     setOpening(true)
     try {
       if (number === null) {
-        setEditing({ number: null, source: 'by hand', rows: [], sku: null, skuPlaceholder: null })
+        setEditing({ number: null, source: 'by hand', rows: [] })
       } else {
         const v = await configApi.mappingVersion(number)
-        setEditing({ number, source: `Mapping v${number}`, rows: v.rows, sku: v.sku, skuPlaceholder: v.skuPlaceholder })
+        setEditing({ number, source: `Mapping v${number}`, rows: v.rows })
       }
     } catch (caught) {
       toast.error("Couldn't open the mapping", { description: asProblem(caught).message })
@@ -135,13 +135,6 @@ export function MappingsTab({ canEdit = true }: { canEdit?: boolean }) {
                 </p>
               )
             )}
-            <p className={overview.sku ? 'text-ink' : 'text-warning'}>
-              {overview.sku
-                ? `SKU field: ${overview.sku.field} on ${overview.sku.topic}`
-                : overview.skuPlaceholder
-                  ? `Placeholder SKU: ${overview.skuPlaceholder}, until the machine publishes its SKU (O-15). Actual values are judged, and HMI setpoints where the Rules tab gives the placeholder targets (ADR-0022)`
-                  : 'SKU field: none yet, so monitoring of the real machine pauses (O-15)'}
-            </p>
           </div>
         ) : (
           <div className="text-[13px]">
@@ -242,7 +235,7 @@ export function MappingsTab({ canEdit = true }: { canEdit?: boolean }) {
                   This version's stored content no longer matches its fingerprint: it was changed outside Centerline. Don't activate it.
                 </p>
               )}
-              <MappingRowsTable required={overview.required} rows={viewing.rows} sku={viewing.sku} skuPlaceholder={viewing.skuPlaceholder} />
+              <MappingRowsTable required={overview.required} rows={viewing.rows} />
             </DialogBody>
           </DialogContent>
         </Dialog>
@@ -266,12 +259,7 @@ export function MappingsTab({ canEdit = true }: { canEdit?: boolean }) {
           }
           details={
             <p className="text-ink-soft text-[12px]">
-              {activating.coverage.mapped} of {activating.coverage.required} tags have a place ·{' '}
-              {activating.sku
-                ? `SKU field: ${activating.sku.field}`
-                : activating.skuPlaceholder
-                  ? `placeholder SKU ${activating.skuPlaceholder}: actual values, and HMI where it has targets`
-                  : 'SKU field: none yet'}
+              {activating.coverage.mapped} of {activating.coverage.required} tags have a place
             </p>
           }
           onClose={() => setActivating(null)}

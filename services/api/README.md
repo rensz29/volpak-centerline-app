@@ -12,8 +12,8 @@ The api service from the SDD (§3, §10). So far it contains:
   [ADR-0012](../../docs/decisions/ADR-0012-rules-configuration-postgresql.md)):
   - the MQTT broker and historian connections;
   - versioned edits of the parameter register;
-  - the monitoring rules: SKUs, targets, limits and delays, as immutable
-    versions activated now or at a set time.
+  - the monitoring rules: each zone's target, limits and delays, as immutable
+    versions activated now or at a set time (ADR-0027: no SKU).
 
   They live in PostgreSQL.
 - **The live Digital Centerline page's data**
@@ -90,22 +90,33 @@ Interactive API docs are at <http://127.0.0.1:8000/api/docs>.
 | `analytics.min_coverage` | Share of a bucket that must be known (default 0.5) |
 | `analytics.heartbeat_gap_s` | Machine silence that counts as a data gap (default 120 s) |
 | `analytics.fetch_window_s`, `fetch_workers` | 6 h per Timebase request, 3 in parallel |
-| `analytics.ranges_csv` | Analytics-valid ranges (ANA-10); `null` = none loaded, and every result says so |
 | `auth.operator_workstations` | `[{"name": "Line desk", "ip": "10.0.0.5"}, …]`: operators sign in only there (SES-04). Empty (the default): no operator can sign in yet |
 | `auth.trusted_proxies` | The proxy's address: from it, `X-Forwarded-For` gives the browser's address |
 | `auth.*` (others) | The URS values, for tests only: 15 min Manager/Administrator inactivity (warned at 13), 5 min operator takeover, 10 privileged sessions, 5 failures lock for 15 min, 24 h temporary passwords, 12-character minimum, last 5 blocked, Argon2id cost |
 | `cors_origins` | Browser origins allowed to call the api directly |
 | `audit_log` | JSON-lines log of query metadata (no data) |
 
-`analytics-ranges.example.csv` shows the ranges format. **Its values are
-placeholders, not engineering ranges.** Copy it, fill in approved values for
-all eleven parameters, and point `ranges_csv` at the copy. A file that fails
-validation is rejected as a whole, and results say why.
+The Analytics-valid ranges (ANA-10/11) aren't configured here any more: an
+Administrator uploads the CSV on Configuration → Analytics ranges, and each
+accepted file is a version in the database
+([ADR-0029](../../docs/decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)). The tab's
+template lists the register's parameters with their units; `analytics-ranges.example.csv`
+shows the format, with placeholder values, not engineering ranges. A file that fails
+validation is rejected as a whole. A leftover `analytics.ranges_csv` is ignored, with a
+warning in the log.
 
 ## Endpoints
 
 Every endpoint's roles are in [ADR-0016](../../docs/decisions/ADR-0016-accounts-sign-in-and-roles.md), and `tests/test_access.py` checks each route
 against that list. State-changing calls need the `X-Centerline-CSRF: 1` header.
+
+Every POST that saves something also needs an `Idempotency-Key` header: a new random value per action, the same one
+when retrying it ([ADR-0028](../../docs/decisions/ADR-0028-polling-idempotency-g2-acceptance.md)). The answer is kept
+24 h for that session and key. A repeat gets it again, marked `Idempotent-Replayed: true`, and nothing is saved twice.
+Reusing a key for a different request answers 422; reusing it while the first request is still running answers 409.
+Exempt: signing in and out, and the POSTs that save nothing (`…/check`, connection tests, the latest values,
+Analytics queries, the mapping import and discovery). The account answers that carry a temporary password are never
+kept: a repeat answers 409. Times in answers are ISO 8601 UTC ending in `Z`.
 
 | Method | Path | Returns |
 |---|---|---|
@@ -125,30 +136,29 @@ against that list. State-changing calls need the `X-Centerline-CSRF: 1` header.
 | POST | `/api/v1/maintenance/{id}/extend`, `/end` | Administrator: move the planned end; end it now (before its start: cancel it) |
 | GET | `/api/v1/health/live` | `{"status": "ok"}` without signing in, for container health checks |
 | GET | `/api/v1/health` | Service status, register version and where it came from, database (reachable, rules, mapping and routing in effect, audit chain intact), monitor-core's last heartbeat (alive, judging, why not), the notifier's (each lane, the backlog), Timebase reachability and clock offset |
-| GET | `/api/v1/analytics/options` | Variables (each active zone's actual and setpoint, plus analytics-only actuals), buckets, aggregations, shifts, groupings, defaults, limits, SKU availability, ranges status |
-| POST | `/api/v1/analytics/query` | One analysis: pairs, statistics, groups, exclusion counts, bucket counts, size guard, warnings |
+| GET | `/api/v1/analytics/options` | Variables (each active zone's actual and setpoint, plus analytics-only actuals), buckets, aggregations, shifts, groupings, defaults, limits, the ranges version in effect |
+| POST | `/api/v1/analytics/query` | One analysis: pairs, statistics, groups, exclusion counts, bucket counts, the ranges applied, size guard, warnings. The query log keeps who ran it and its description, never the data |
 | GET | `/api/v1/config/connections` | Broker and historian settings. Secrets are never returned, only whether each is set |
 | PUT | `/api/v1/config/connections/historian`, `/mqtt` | Save a connection with a reason. A typed secret goes to `secrets/` (0600); an empty one keeps the saved one |
-| POST | `/api/v1/config/connections/historian/test`, `/mqtt/test` | Try the form's settings without saving: datasets, tag count and clock offset; or connect, listen 3–30 s and report topics, register tags found and SKU-like fields |
+| POST | `/api/v1/config/connections/historian/test`, `/mqtt/test` | Try the form's settings without saving: datasets, tag count and clock offset; or connect, listen 3–30 s and report topics and register tags found |
 | GET | `/api/v1/config/historian/tags?q=` | Timebase tags under the machine namespace, with the zone already using each |
 | POST | `/api/v1/config/historian/latest` | Latest value of up to 100 tags |
 | GET | `/api/v1/config/register` | The register and its 15 most recent changes |
 | PUT | `/api/v1/config/register/parameters/{id}` | Replace a parameter's status and zones. Needs `baseVersion` (409 if stale) and a reason; tags are checked against Timebase |
-| GET | `/api/v1/config/rules` | Rules in effect, scheduled activations, every version with its status, SKUs and their readiness |
+| GET | `/api/v1/config/rules` | Rules in effect, scheduled activations, every version with its status, and what the rules in effect leave each zone without (`gaps`: limits, or a target) |
 | GET | `/api/v1/config/rules/proposal` | The Phase 0 starting point: ADR-0002 delays and limits, the ADR-0010 stop pause |
-| GET | `/api/v1/config/versions/{n}` | Rules v*n*: settings, rows, readiness, and whether its content still matches its hash |
-| POST | `/api/v1/config/versions/check` | Validation and readiness for a draft, without saving |
+| GET | `/api/v1/config/versions/{n}` | Rules v*n*: settings, rows, gaps, and whether its content still matches its hash. A version saved for a SKU before ADR-0027 also has `carryOver`: that SKU's rows as the zones' own, for a new version to start from |
+| POST | `/api/v1/config/versions/check` | Validation and gaps for a draft, without saving |
 | POST | `/api/v1/config/versions` | Save a new version. Needs `expectedLatest` (409 if another was saved) and a reason; `activate` = `no`, `now` or `at` |
 | POST | `/api/v1/config/versions/{n}/activate` | Activate now or `at` a future time; an older version is a rollback. Needs `expectedActive` and a reason |
 | POST | `/api/v1/config/activations/{id}/cancel` | Cancel a scheduled activation before it takes effect |
-| POST, PUT, DELETE | `/api/v1/config/skus`, `/skus/{code}` | Add, rename, or remove a SKU no saved version uses |
 | GET | `/api/v1/config/mappings` | Mapping in effect and its coverage, scheduled activations, versions, the tags monitor-core needs, the connection's topic filters |
 | GET | `/api/v1/config/mappings/versions/{n}`, `/versions/{n}/export.csv` | Mapping v*n* with coverage, warnings and whether it's intact; or as `tag,topic,field` CSV |
 | POST | `/api/v1/config/mappings/versions/check`, `/versions` | Check a mapping, or save it (`expectedLatest`, reason, `activate`); activation needs a place for every tag |
 | POST | `/api/v1/config/mappings/versions/{n}/activate`, `/activations/{id}/cancel` | Activate now or later (older = rollback), or cancel a scheduled one |
 | POST | `/api/v1/config/mappings/import` | Rows from a probe `topic-map.json` or a CSV, for the editor; nothing is saved |
-| POST | `/api/v1/config/mappings/discover` | Listen 3–30 s on the saved broker (read-only) and return each tag's place and SKU-like fields |
-| GET | `/api/v1/monitoring/live` | monitor-core's latest heartbeat (alive after < 60 s, judging or why not, SKU, versions), every zone's values, bands, states and pending delays grouped by parameter, the open events and their counts |
+| POST | `/api/v1/config/mappings/discover` | Listen 3–30 s on the saved broker (read-only) and return each tag's place |
+| GET | `/api/v1/monitoring/live` | monitor-core's latest heartbeat (alive after < 60 s, judging or why not, versions), every zone's values, bands, states and pending delays grouped by parameter, the open events and their counts |
 | GET | `/api/v1/events/{id}` | One event: the rule pinned to it, the rules, mapping and register versions it was judged under, every transition with its inputs, its notifications, its reason requests |
 | GET | `/api/v1/monitoring/brief-changes?limit=` | Setpoints back on target before the delay ended (HMI-05), newest first |
 | GET | `/api/v1/notifications?state=&before=&limit=` | Manager, Administrator: messages newest first (all, on their way, failed, not sent, TEST) with their deliveries, and the counts waiting and failed |
@@ -157,6 +167,8 @@ against that list. State-changing calls need the `X-Centerline-CSRF: 1` header.
 | POST | `/api/v1/deliveries/{id}/redrive` | Administrator: send a permanent failure again, with a reason; audited (NOT-05) |
 | GET | `/api/v1/config/routing`, `/routing/proposal`, `/routing/versions/{n}` | Who gets which messages: the routing in effect, the Phase 2 proposal, one version with its warnings |
 | POST | `/api/v1/config/routing/versions/check`, `/versions`, `/versions/{n}/activate`, `/activations/{id}/cancel` | Administrator: check, save, activate (not while a kind of Critical reaches nobody, ACT-03), cancel a scheduled one |
+| GET | `/api/v1/config/analytics-ranges`, `/template.csv`, `/versions/{n}`, `/versions/{n}/original.csv` | The Analytics-valid ranges in effect, scheduled activations and every version; a template to fill in; one version's rows and whether it still fits the register; the file exactly as uploaded (ADR-0029) |
+| POST | `/api/v1/config/analytics-ranges/versions/check`, `/versions`, `/versions/{n}/activate`, `/activations/{id}/cancel` | Administrator: check a file (base64, as uploaded), save it whole as a new version with a reason, activate now or later (an older one: rollback), cancel a scheduled one |
 | PUT | `/api/v1/config/connections/notifications` | Administrator: the link base, the Teams flow URL and the SMTP relay; the URL and the password are write-only |
 | POST | `/api/v1/config/connections/notifications/email-test` | Administrator: connect to the relay and sign in, sending nothing |
 | GET | `/api/v1/workflow/requests`, `/workflow/requests/{id}` | Reason requests with every entry, the follow-up questions in effect and the counts per step: an operator sees the shift's, others the open ones and the last day's |
@@ -182,7 +194,7 @@ queries return 422 with `errors: [{field, message}]`; Timebase failures return 5
 ## How a query is computed
 
 1. **Validate:** variables exist and differ, the range is in the past and
-   within the maximum, and no SKU filter is given while there's no SKU tag.
+   within the maximum.
 2. **Fetch** X and Y, plus each involved machine area's `_timestamp`, in 6 h
    windows with kept-alive connections. Unreadable Timebase spans are split
    down to 60 s and remembered.
@@ -203,8 +215,8 @@ queries return 422 with `errors: [{field, message}]`; Timebase failures return 5
 | Where | Holds |
 |---|---|
 | Database `register_version` | Every register version, `<Manila date>.<n>`; numbers are never reused |
-| Database `config_version`, `sku_parameter_rule`, `config_activation`, `sku` | Rules versions and their rows, activations, the SKU list |
-| Database `mapping_version`, `tag_mapping`, `mapping_activation` | Tag mapping versions (each tag's topic and field, the SKU field or a placeholder SKU, ADR-0022) and their activations |
+| Database `config_version`, `parameter_rule`, `config_activation` | Rules versions and their rows, activations |
+| Database `mapping_version`, `tag_mapping`, `mapping_activation` | Tag mapping versions (each tag's topic and field) and their activations |
 | Database `routing_version`, `routing_activation` | Notification routing versions and their activations (ADR-0023) |
 | Database `audit_log` | Every save: time, action, summary, reason, versions, before and after; hash-chained |
 | `config/parameter-register.json` | The current register, rewritten after each save for the Phase 0 tools and git. Hand edits aren't used: the page says so, and the next save keeps a copy in `history/` |
@@ -219,7 +231,7 @@ back on the page yet, but every version is kept.
 ## Tests
 
 ```bash
-cd services && .venv/bin/python -m pytest      # 133 api tests (221 with monitor-core's and the notifier's), run as centerline_app: unit, schema, API against the mock Timebase and the database, MQTT on a local Mosquitto
+cd services && .venv/bin/python -m pytest      # 148 api tests (258 with monitor-core's, the notifier's and the acceptance suites), run as centerline_app: unit, schema, API against the mock Timebase and the database, MQTT on a local Mosquitto
 ```
 
 The tests use the register the mock Timebase was built for

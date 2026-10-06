@@ -1,7 +1,8 @@
 # ADR-0007: Parameter register with zones; SKU from the machine payload
 
 - **Status:** Accepted. P09 items O-17 and O-19 are open. Decision 1 amended by
-  [ADR-0012](ADR-0012-rules-configuration-postgresql.md): the database holds the register, and the file is its export
+  [ADR-0012](ADR-0012-rules-configuration-postgresql.md): the database holds the register, and the file is its export.
+  Amended by [ADR-0027](ADR-0027-no-sku.md) (2026-10-05): the register has no SKU entry, and O-15 is dropped
 - **Date:** 2026-09-29
 - **Decider:** Szyrelle (system owner)
 - **Adds:** O-15, O-16, O-17, O-19

@@ -158,7 +158,6 @@ export function EventHistoryPage() {
                   <th className="px-3 py-2 font-semibold">Zone</th>
                   <th className="px-3 py-2 font-semibold">Lasted</th>
                   <th className="px-3 py-2 font-semibold">How it ended</th>
-                  <th className="px-3 py-2 font-semibold">SKU</th>
                 </tr>
               </thead>
               <tbody>
@@ -176,7 +175,6 @@ export function EventHistoryPage() {
                       {e.closedAt ? duration(Date.parse(e.closedAt) - Date.parse(e.openedAt)) : '—'}
                     </td>
                     <td className="text-ink-soft px-3 py-2">{EVENT_STATE_LABEL[e.state] ?? e.state}</td>
-                    <td className="text-ink-soft px-3 py-2">{e.sku}</td>
                   </tr>
                 ))}
               </tbody>

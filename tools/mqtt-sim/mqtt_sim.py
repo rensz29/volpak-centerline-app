@@ -15,7 +15,6 @@ Scenarios (combine freely):
                       (default 600): a mismatch nobody puts back, which asks the operator why (ADR-0025)
   --skew-s S          payload clock offset from this PC (the plant edge runs about −114 s)
   --stop-area A --stop-after N   stop publishing area A after N s (stale data)
-  --sku-field F --sku CODE       also publish a SKU field (e.g. SPC.SKU_Code) to test ADR-0001
   --drift-every N     every N s a random zone's actual leaves its band: Warning for 60 s, and on every
                       other drift Critical for 60 s more, then back (the bands are the Rules proposal's)
   --machine-stop-every N --machine-stop-for S   the machine stops (Machine_Run 0) for S s every N s
@@ -54,7 +53,7 @@ def bands() -> dict[str, tuple[float, float]]:
     except (OSError, ValueError, KeyError):
         return {}
     return {r["parameter_id"]: (float(r["warn_high"]), float(r["crit_high"])) for r in rules
-            if r.get("sku") is None and r.get("zone_id") is None and r.get("warn_high") is not None}
+            if r.get("zone_id") is None and r.get("warn_high") is not None}
 
 
 def is_local(host: str) -> bool:
@@ -79,15 +78,11 @@ def main() -> int:
     ap.add_argument("--mismatch-for", type=float, default=600)
     ap.add_argument("--stop-area")
     ap.add_argument("--stop-after", type=float, default=0)
-    ap.add_argument("--sku-field", help="publish the SKU as AREA.FIELD, e.g. SPC.SKU_Code")
-    ap.add_argument("--sku", default="SIM-SKU-1")
     ap.add_argument("--drift-every", type=float, default=0)
     ap.add_argument("--machine-stop-every", type=float, default=0)
     ap.add_argument("--machine-stop-for", type=float, default=120)
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
-    if args.sku_field and "." not in args.sku_field:
-        ap.error("--sku-field needs AREA.FIELD, e.g. SPC.SKU_Code")
 
     if not is_local(args.host) and args.host != args.allow_host:
         sys.exit(f"refusing to publish to {args.host}: not this machine. Pass --allow-host {args.host} "
@@ -166,9 +161,6 @@ def main() -> int:
             for name, tag in reg.context.items():
                 value = (1 if running else 0) if name == "machine_run" else (41 if running else 0)
                 areas.setdefault(reg.group_of(tag), {})[tag.rsplit(".", 1)[1]] = value
-            if args.sku_field:
-                area, field = args.sku_field.split(".", 1)
-                areas.setdefault(area, {})[field] = args.sku
 
             for area, fields in areas.items():
                 if args.stop_area == area and now - t_start >= args.stop_after:

@@ -20,7 +20,7 @@ Phase 1 UI prototype (`client/`) differs from the target.
 > ([ADR-0007](decisions/ADR-0007-parameter-register.md)). The broker, the historian and the
 > register's tags are set on the **Configuration page** ([ADR-0011](decisions/ADR-0011-configuration-page.md)).
 > Its **Mappings tab** says where each tag arrives on the broker ([ADR-0013](decisions/ADR-0013-tag-mappings.md)),
-> and its **Rules tab** holds the monitoring rules (targets per SKU and zone, limits and delays). Both are
+> and its **Rules tab** holds the monitoring rules (each zone's target, limits and delays). Both are
 > versioned in **PostgreSQL**, which also keeps the register's versions and the audit log
 > ([ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md)). Nothing is active until the owner
 > activates a version. **Phase 1 has started**: monitor-core judges the simulator end to end
@@ -32,15 +32,21 @@ Phase 1 UI prototype (`client/`) differs from the target.
 > The Alarms pages show the live events; the prototype's sample plant is gone ([ADR-0019](decisions/ADR-0019-alarm-pages-live.md)).
 > monitor-core keeps a disk journal through database outages ([ADR-0018](decisions/ADR-0018-disk-journal.md)), and the
 > services connect as a least-privilege role that can only add evidence ([ADR-0020](decisions/ADR-0020-database-roles.md)).
-> The owner accepted the default delays ([ADR-0002](decisions/ADR-0002-default-delays.md)), deferred the SKU field and accepted the broker's
+> The owner accepted the default delays ([ADR-0002](decisions/ADR-0002-default-delays.md)) and the broker's
 > security as it is for now, so connecting to the real broker waits on the control-room PC test and M7 ([ADR-0021](decisions/ADR-0021-g0b-revised.md)).
-> Until the machine publishes its SKU, a placeholder SKU lets its actual values be judged, and its HMI setpoints wherever the Rules tab gives it targets ([ADR-0022](decisions/ADR-0022-placeholder-sku.md), amended 2026-10-02).
+> Centerline has no SKU: the rules give each zone its limits and its target, the line is judged once every zone has its limits, and a zone without a target is judged on its actual value only ([ADR-0027](decisions/ADR-0027-no-sku.md)).
 > **Phase 2 has started**, notifications first: the notifier delivers the outbox to Teams and email by a versioned routing,
 > with retries, TEST messages and re-drives on the Notifications page; the channels are placeholders until IT answers O-05 ([ADR-0023](decisions/ADR-0023-notifier.md)).
 > The shift handover and the reason workflow followed: every HMI mismatch asks that shift's operator why, a Manager guides and the operator
 > acknowledges, and the operator's session ends with its shift after a 5-min warning ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)).
 > Since 2026-10-02 the real application on the development laptop judges the real machine: monitor-core (read-only) and the
 > notifier run on the real database; G0b now gates only the control-room PC ([ADR-0026](decisions/ADR-0026-real-app-on-the-real-machine.md)).
+> On 2026-10-06 Phase 2's acceptance suites AT-04…06 passed. The pages poll rather than use a WebSocket, every POST that saves something
+> carries an `Idempotency-Key`, and times end in `Z` ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)). G2's sign-off waits on the real Teams flow and
+> relay (O-05) and the HTTPS proxy. Phase 4 then closed: the Analytics-valid ranges became versions an Administrator uploads, and
+> AT-ANA-01…10 passed on an independently calculated dataset, so **G4 is met** ([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)).
+> The same day the application went into Docker: proxy, api, monitor-core, notifier and postgres, judging the real plant on a database of
+> their own, as a rehearsal for the control-room PC ([ADR-0030](decisions/ADR-0030-docker-stack.md)).
 
 ID conventions used throughout (same as the SDD):
 
@@ -78,12 +84,12 @@ ID conventions used throughout (same as the SDD):
 
 ## 1. Scope in one page
 
-**One line · 11 URS parameters (P01–P11), 5 of them active with 14 zones · 28 tags + a SKU field over MQTT**
+**One line · 11 URS parameters (P01–P11), 5 of them active with 14 zones · 28 tags over MQTT**
 ([register](../config/parameter-register.json)). P01, P05, P07, P08, P10 and P11 are waiting for their tags.
 
 | Capability | What it must do | URS |
 |---|---|---|
-| Acquisition | Subscribe (read-only) to the machine's MQTT area messages for the SKU field and every zone's setpoint and actual; detect stale areas and lost connections | OPC-01…08 (ADR-0006) |
+| Acquisition | Subscribe (read-only) to the machine's MQTT area messages for every zone's setpoint and actual; detect stale areas and lost connections | OPC-01…08 (ADR-0006, ADR-0027) |
 | Monitoring | HMI integer-mismatch rule and Actual Warning/Critical rules, with delays, supersede and recovery | HMI-01…05, ACT-01…04, MON-01 |
 | Operator workflow | Per active mismatch per shift: one reason, ≤2 clarifications, one OCAP/guidance acknowledgment | WF-01…03, SES-01…05 |
 | OCAP & AI | ≤3 approved OCAP sections, AI summary beside the exact source, English + Filipino | AI-01/02, OCP-01…03, GDE-01, LAN-01 |
@@ -122,7 +128,8 @@ Every PR must preserve these. Most have a test that must fail if the invariant b
    only on the broker and PostgreSQL *or* its disk journal. Browser, api, notifier,
    ai-worker, ollama and backup-agent may all be down without stopping monitoring (DEP-03).
 3. **Services talk through PostgreSQL, not to each other.** No service-to-service HTTP
-   on the monitoring path. Wake-ups use `LISTEN/NOTIFY`; work is claimed from tables.
+   on the monitoring path. Work is claimed from tables. Wake-ups were to use `LISTEN/NOTIFY`; on one line the
+   services and pages poll instead ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)).
 4. **Evidence is append-only.** Event headers, transitions, inputs and snapshots are
    INSERT-once. The app DB role has only `INSERT, SELECT` on evidence tables and triggers
    reject `UPDATE`/`DELETE` (DAT-01).
@@ -131,8 +138,8 @@ Every PR must preserve these. Most have a test that must fail if the invariant b
 6. **One transaction per state change:** event + transition + workflow request +
    outbox rows are committed together or not at all (NOT-03).
 7. **No evaluation on untrusted data.** Pause gate closes on any stale machine area (silent
-   past its threshold), missing or invalid field, lost broker connection, missing SKU or
-   maintenance window (OPC-03, OPC-08, MNT-01).
+   past its threshold), missing or invalid field, lost broker connection, rules that don't give
+   every zone its limits, or maintenance window (OPC-03, OPC-08, MNT-01).
 8. **AI never authors corrective instructions.** Every instruction shown comes verbatim
    from an approved OCAP section or a Manager. Citations outside the retrieved set are
    rejected server-side (AI-02, OCP-02).
@@ -161,7 +168,7 @@ records, so live monitoring and Analytics see the same values.
 |---|---|---|---|
 | **monitor-core** | MQTT subscriber (read-only), snapshot gate, HMI + Actual rules per zone, durable timers, shift clock; writes events + outbox rows; heartbeat every 2 s, carrying the live values ([ADR-0015](decisions/ADR-0015-live-centerline-page.md)) | **stops — it *is* the monitor** | OPC (ADR-0006), HMI, ACT, MON-01, RES-01 |
 | **postgres** (+pgvector) | System of record: config, events, audit, outbox, users, OCAP text + embeddings | continues — monitor-core journals to disk for 30 min | DAT-01, RES-01 |
-| **api** | REST + WebSocket, login/sessions, workflow, config, OCAP admin, exports, Analytics | continues | IAM, SES, WF, EXP, ANA |
+| **api** | REST (polled; no WebSocket for one line, ADR-0028), login/sessions, workflow, config, OCAP admin, exports, Analytics | continues | IAM, SES, WF, EXP, ANA |
 | **proxy** (Caddy) | TLS, serves the web UI, overwrites client-IP header | continues | SEC-01, SES-04 |
 | **notifier** | Outbox workers, one lane per channel; watches monitor-core heartbeat | continues | NOT-01…07 |
 | **ai-worker** | OCAP parsing, embedding, retrieval, clarification, summary, translation | continues (deterministic fallback) | AI, OCP, LAN-01 |
@@ -171,7 +178,7 @@ records, so live monitoring and Analytics see the same values.
 
 **DD-01** Acquisition and rules share one process — single writer per parameter, no race on
 event state, 2 s budget met in-memory.
-**DD-02** No internal message broker — outbox table + `LISTEN/NOTIFY` is enough at about
+**DD-02** No internal message broker — outbox table + polling ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md); `LISTEN/NOTIFY` if ever needed) is enough at about
 2 area messages/s and 1,000 events/day, and is one less thing to back up. The plant MQTT
 broker is an input only; Centerline services never talk to each other through it.
 
@@ -190,9 +197,8 @@ VM, and record it as a DEP-01 deviation.
 
 ## 4. Repository layout
 
-The prototype today is `client/` (React + Vite) and an empty `server/server.js`. The
-target backend is **Python 3.12+ / FastAPI** (§14) — replace `server/` rather than grow a
-Node server. Suggested layout:
+The web app is `client/` (React + Vite); the backend is **Python 3.12+ / FastAPI** (§14) in `services/`.
+The prototype's empty `server/server.js` is gone. Layout, with what's built marked:
 
 ```
 volpak-digital-centerline/
@@ -230,13 +236,13 @@ volpak-digital-centerline/
 │  ├─ ai_worker/               ingest/, retrieve/, generate/, verify/, fallback/
 │  └─ backup_agent/            pgBackRest config + file copy jobs
 ├─ db/
-│  ├─ migrations/              (built: 0001 configuration … 0006 the services' role, 0007 placeholder SKU, 0008 notifications, 0009 the reason workflow, 0010 TRUNCATE guards) plain SQL in order, recorded with hashes
+│  ├─ migrations/              (built: 0001 configuration … 0006 the services' role, 0007 placeholder SKU, 0008 notifications, 0009 the reason workflow, 0010 TRUNCATE guards, 0011 no SKU) plain SQL in order, recorded with hashes
 │  └─ seed/                    rules-proposal.json (ADR-0012), routing-proposal.json (ADR-0023); later line, parameters, zones, units
 ├─ deploy/
 │  ├─ dev/compose.yaml         (built) development PostgreSQL 17 + pgvector on 127.0.0.1:55432
-│  ├─ compose.yaml             9 services, health checks, restart policies
-│  ├─ caddy/                   Caddyfile, internal-CA certs (not committed)
-│  ├─ secrets/                 README only — real secrets never committed
+│  ├─ compose.yaml             (built: 5 of the 9, [ADR-0030](decisions/ADR-0030-docker-stack.md)) health checks, restart policies; services.Dockerfile, web.Dockerfile
+│  ├─ caddy/                   (built) Caddyfile; its internal CA lives in a volume, never committed
+│  ├─ config/                  (git-ignored) this host's settings and secrets, seeded by setup.sh
 │  └─ offline-kit/             scripts to export images (by digest) + models
 ├─ config/                     files next to the database (ADR-0011, ADR-0012)
 │  ├─ parameter-register.json  the register, exported after each save (the database is the source)
@@ -251,8 +257,8 @@ volpak-digital-centerline/
 │  ├─ mqtt-sim/                simulated Volpak publisher for dev and G1 (local broker only)
 │  └─ notify-sink/             a local Teams flow and SMTP relay that keep what they receive (ADR-0023)
 ├─ tests/
-│  ├─ acceptance/              AT-01 … AT-08, AT-ANA-01 … AT-ANA-10
-│  └─ fixtures/                analytics reference dataset + independent results
+│  ├─ acceptance/              (built: AT-04…06, ADR-0028; AT-ANA-01…10, ADR-0029) AT-01 … AT-08, AT-ANA-01 … AT-ANA-10
+│  └─ fixtures/                (built, ADR-0029) analytics reference dataset + independent results
 └─ docs/
    ├─ ARCHITECTURE.md          this file
    ├─ decisions/               ADRs
@@ -275,10 +281,10 @@ From "configured delay ends" to Operator popup ≈ 3 s; first delivery attempt �
 | # | Component | What happens | Budget | URS |
 |---|---|---|---|---|
 | 1 | monitor-core | MQTT message for a machine area arrives (≈ 1/s; whole area in one JSON payload) | as published | OPC-02 |
-| 2 | monitor-core | Snapshot gate: every mapped area fresh (SPC 30 s, Dosing 90 s), every field valid, SKU valid, else pause | in memory | OPC-03/05/08 |
+| 2 | monitor-core | Snapshot gate: every mapped area fresh (SPC 30 s, Dosing 90 s), every field valid, every zone with its limits, else pause | in memory | OPC-03/05/08 |
 | 3 | monitor-core | Rules against active config version; delay timers start/cancel | 2 s from step 1 | HMI-01, ACT-01, PER-01 |
 | 4 | monitor-core | Delay ends → **one transaction**: event, transition, workflow request, outbox rows | 2 s | HMI-02, NOT-03 |
-| 5 | api | `LISTEN/NOTIFY` wakes api → WebSocket popup | 3 s | PER-01 |
+| 5 | api | The operator's page asks every 2 s and pops the request up ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md): polling instead of `LISTEN/NOTIFY` and a WebSocket) | 3 s | PER-01 |
 | 6 | notifier | Worker claims outbox rows → first delivery attempt | 10 s | NOT-04 |
 | 7 | Operator + ai-worker | Reason, clarifications, OCAP choice, acknowledgment | 30 s per AI call | WF-01, AI-02 |
 | 8 | monitor-core | Workflow still open after 15 min → one Management escalation | timer | WF-03 |
@@ -329,16 +335,16 @@ Evaluation runs **only** when: connected to the broker **and** every mapped area
 live message within its freshness threshold, set per area at ≥ 1.5 × the largest regular gap:
 **SPC 30 s, Dosing_Parameters 90 s**, measured on 28 days of Timebase arrivals (ADR-0006; the
 MQTT probe confirms them). The SDD's 10 s would pause monitoring 100–150 times a day; it can
-return only if the edge publishes at a fixed ≤ 5 s interval. **and** every monitored field is present and valid **and** the SKU field is valid
-**and** no maintenance window is active. Retained messages never count as fresh.
+return only if the edge publishes at a fixed ≤ 5 s interval. **and** every monitored field is present and valid **and** the rules in effect
+give every zone its four limits **and** no maintenance window is active. Retained messages never count as fresh.
 
 When the gate closes:
 - stop evaluation **and** timers; write a `pause_period` row;
 - keep open events open;
-- missing SKU additionally alerts Management (OPC-08).
+- incomplete rules, when everything else is in order, additionally alert Management once (OPC-08 as [ADR-0027](decisions/ADR-0027-no-sku.md) amends it).
 
 **Resume** only after a complete, fresh snapshot: a live message from every mapped area
-since the reconnect or pause, all fields valid, SKU valid (OPC-05).
+since the reconnect or pause, all fields valid (OPC-05).
 
 **Built ([ADR-0017](decisions/ADR-0017-monitoring-control.md)):** a whole-line maintenance window closes the gate,
 with "Maintenance: …" as the reason, and after it only messages from after its end count. A
@@ -370,7 +376,7 @@ def hmi_matches(target: float, hmi: float) -> bool:
   (delay elapsed: notify, reason due) **→ Resolved** (back at target: recovery notice).
 - A *new* off-target integer while an event is open → **Superseded** (old event closed,
   `supersedes_event_id` linked) and the delay **restarts** (HMI-03).
-- Back at target before the delay ends → **Brief change**, handled per SKU × parameter mode
+- Back at target before the delay ends → **Brief change**, handled per parameter (or zone) mode
   (HMI-05, A-04):
 
   | Mode | What is stored | Notifies / workflow? |
@@ -407,7 +413,7 @@ def classify(x: float, w_low, w_high, c_low, c_high) -> Severity:
 
 - Every transition waits for its own delay: Warning delay, Critical delay, Warning delay
   (downgrade), **Recovery delay** (URS default 15 s, ACT-02). Values come from the rules version in
-  effect, per SKU, parameter and zone ([ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md)); the
+  effect, per parameter and zone ([ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md), [ADR-0027](decisions/ADR-0027-no-sku.md)); the
   starting proposal is ADR-0002's.
 - Return to Normal sends a recovery notice.
 - Warning notifications are switchable per config; **Critical ones cannot be disabled** (ACT-03).
@@ -427,16 +433,9 @@ def classify(x: float, w_low, w_high, c_low, c_high) -> Severity:
 - **Monitoring disabled** for a parameter: close the active event as *Monitoring disabled*,
   cancel dependent timers and workflows, keep initial notifications on record, send **no**
   recovery notice (MON-01). Who may disable — O-13.
-- **SKU changeover** ([ADR-0001](decisions/ADR-0001-sku-changeover.md)): a change to a
-  *different configured* SKU closes the gate, closes open events as `CLOSED_SKU_CHANGEOVER`,
-  cancels timers and workflows (with `draft.purge`), sends no recovery notices but one
-  Management system notification, and resumes on a fresh snapshot under the new SKU. A
-  missing, stale or unconfigured SKU is the OPC-08 pause instead: events stay open. The SKU
-  comes from a field the edge team is adding to the machine payload (ADR-0007, O-15). Until
-  then a **placeholder SKU** in the mapping stands in: actual values are judged against their
-  setpoints, HMI setpoints against the targets the Rules tab gives the placeholder (none: not
-  judged), and mapping the field later is an ordinary changeover
-  ([ADR-0022](decisions/ADR-0022-placeholder-sku.md), amended 2026-10-02).
+- **No changeover** ([ADR-0027](decisions/ADR-0027-no-sku.md)): nothing is judged per product. A product change that moves
+  setpoints raises HMI mismatches against the targets in effect until a Manager activates a
+  version with the new targets; activation can be scheduled for the changeover time.
 
 ### 6.6 Database outage and the disk journal (RES-01/02)
 
@@ -473,8 +472,8 @@ dropped: the provisional degraded mode until O-12 decides the rest.
 > - The questions are two, and an Administrator edits them.
 > - With no OCAP library yet, every request goes to a Manager's guidance, and the operator
 >   acknowledges it.
-> - The escalation and the drafts are as below. Until the WebSocket, polling stands in for the
->   purge: every 2 s for an operator.
+> - The escalation and the drafts are as below. Polling replaces the WebSocket's purge ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)): every 2 s for
+>   an operator, and a closed request's status drops its draft.
 > - At the shift's end an unfinished request closes as not answered, and the next shift's operator
 >   gets a new one (O-11).
 > - OCAP (steps 4–5) and the AI come in Phase 3.
@@ -494,8 +493,8 @@ dropped: the provisional degraded mode until O-12 decides the rest.
 - Still open 15 min after the request → one escalation to Management (A-05: clock starts
   at request creation).
 - Unsent text lives **only** in browser `localStorage`; wipe it on logout, handover,
-  takeover, cancellation, resolution or superseding. The server sends a **purge message
-  over WebSocket** for cases the browser can't detect.
+  takeover, cancellation, resolution or superseding. For the cases the browser can't detect, the request's
+  status says it closed: a **purge** the browser reads on its next poll ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md); the SDD had a WebSocket message).
 
 ### 7.2 Retrieval pipeline (ai-worker)
 
@@ -503,7 +502,7 @@ dropped: the provisional degraded mode until O-12 decides the rest.
 |---|---|---|
 | Ingest | Upload → ClamAV → text extraction keeping headings + page numbers (pdfplumber, python-docx) → sections → chunks | OCP-03, SEC-01 |
 | Index | Embed chunks with the pinned embedding model into pgvector, tagged with OCAP version. Only **Approved + Active** versions are searchable; suspending removes it in the same transaction | OCP-01 |
-| Query | Event context (parameter, direction, severity, SKU) + reason translated to English; merge vector + full-text results, group by section, keep top 3 | OCP-01, LAN-01 |
+| Query | Event context (parameter, zone, direction, severity) + reason translated to English; merge vector + full-text results, group by section, keep top 3 | OCP-01, LAN-01 |
 | Generate | Prompt holds **only** retrieved section text; model returns JSON `{summary, section_ids}` | AI-02 |
 | Verify | Reject any citation outside the retrieved set → show source section **with no summary** | OCP-02 |
 | Record | Store model digests, prompt template version, retrieved IDs, raw output with the event | DAT-01 |
@@ -592,13 +591,13 @@ is kept and audited). Scatter and Trend render from the same result (ANA-03, -15
 
 ### 9.1 Pipeline (api)
 
-1. **Validate** — SKU optional until a SKU tag exists (ADR-0008); shift = All or one; X ≠ Y,
+1. **Validate** — shift = All or one; X ≠ Y,
    both analytics variables: the **actual value or setpoint** of any active zone, plus the
    `analytics_only` P08 actual ([ADR-0009](decisions/ADR-0009-setpoints-in-analytics.md));
    channels `P02.V1.actual` / `P02.V1.setpoint`, shown as "Vertical 1 · Setpoint";
    bucket ∈ {10 s, 30 s, 1 min, 5 min, 15 min, 1 h}; aggregation ∈ {AVG, MIN, MAX};
    range not in the future, ≤ configured max (30 days default) (ANA-04…07, -18).
-2. **Fetch** — `HistorianClient` adapter pulls X, Y, SKU and shift in UTC. Probed facts
+2. **Fetch** — `HistorianClient` adapter pulls X and Y in UTC; the shift comes from the timestamp (ADR-0008). Probed facts
    (O-03, [tools/timebase-analysis](../tools/timebase-analysis/README.md)):
    `GET http://10.156.116.179:4516/api/datasets/dressings/data?tagname=…&tagname=…&unixStart=…&unixEnd=…`;
    the first point per tag is the value in force at the start; values are stored on change;
@@ -636,7 +635,8 @@ $$
 - Every result carries the fixed note: *correlation shows association, not causation* (ANA-14).
 - Group stats (ANA-17): < 3 pairs = Insufficient data; 3–29 = Low sample size; max 10
   groups visible — the **10 most recent** production dates (proposed default for O-10).
-- Validate results against an independent tool for AT-ANA-05.
+- Validate results against an independent tool for AT-ANA-05. **Done** ([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)): `tests/fixtures/analytics/independent.py`,
+  standard library with exact fractions and 50-digit decimals, and a CSV for a spreadsheet check.
 
 ### 9.3 Analytics-valid ranges CSV (ANA-10/11)
 
@@ -644,8 +644,11 @@ Columns `parameter_id, unit, valid_min, valid_max`; exactly one row for each P01
 Whole file accepted or rejected: units must match the parameter register, `min < max`.
 Store original bytes, SHA-256, version number and the Administrator's reason. Rollback
 reactivates an earlier version and writes its own audit row.
-**Built so far:** whole-file validation and SHA-256 of the file named in the api config;
-versions, reason and rollback wait for the Phase 1 database (ANA-11 partly met).
+**Built** ([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md), migration 0013): an Administrator uploads the file on Configuration → Analytics
+ranges; `analytics_range_version` keeps it byte for byte with its SHA-256, the register version, the reason and who
+saved it, `analytics_range` its rows, `analytics_range_activation` when each takes effect. Queries use the version
+in effect, re-checked against the register as it is now, and each result names it. The api config's `ranges_csv`
+is retired.
 
 ### 9.4 Front end
 
@@ -667,8 +670,8 @@ PostgreSQL 17+ with pgvector. All timestamps `timestamptz` in UTC.
 
 | Area | Tables | Notes |
 |---|---|---|
-| Reference | `line`, `parameter`, `parameter_zone`, `sku` | Seeded from the register: P01–P11 with units, zones with their tags and status |
-| Configuration | `config_version`, `sku_parameter_rule` (per parameter, optional zone override), `tag_mapping_version`, `tag_mapping` (tag → topic + field), `analytics_range_version`, `analytics_range`, `routing_rule` | Versioned with content hash; immediate or scheduled activation; rollback reactivates an earlier version; `version` column for optimistic locking. **Built** ([ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md), [ADR-0013](decisions/ADR-0013-tag-mappings.md)): `config_version`, `sku_parameter_rule` (SKU or every SKU × zone or every zone), `config_activation`, `mapping_version`, `tag_mapping`, `mapping_activation`, `register_version`, `sku`, and the hash-chained `audit_log`, append-only by trigger |
+| Reference | `line`, `parameter`, `parameter_zone` | Seeded from the register: P01–P11 with units, zones with their tags and status |
+| Configuration | `config_version`, `parameter_rule` (per parameter, optional zone override), `tag_mapping_version`, `tag_mapping` (tag → topic + field), `analytics_range_version`, `analytics_range`, `routing_rule` | Versioned with content hash; immediate or scheduled activation; rollback reactivates an earlier version; `version` column for optimistic locking. **Built** ([ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md), [ADR-0013](decisions/ADR-0013-tag-mappings.md)): `config_version`, `parameter_rule` (a zone or every zone of the parameter; `sku_parameter_rule` until [ADR-0027](decisions/ADR-0027-no-sku.md)), `config_activation`, `mapping_version`, `tag_mapping`, `mapping_activation`, `register_version`, the Analytics-valid ranges `analytics_range_version`, `analytics_range` and `analytics_range_activation` ([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)), and the hash-chained `audit_log`, append-only by trigger. What was saved about SKUs before ADR-0027 stays in `legacy_*` columns that new rows can't fill |
 | Monitoring | `event`, `event_transition`, `event_state`, `lightweight_change`, `scheduled_action`, `pause_period` | UUIDv7 IDs from monitor-core; `lightweight_change` partitioned by month; `event_state` is a projection rebuildable from transitions. **Built** (migration 0003, [ADR-0014](decisions/ADR-0014-monitor-core.md)) with `notification` (the outbox), `event_acknowledgment` and `monitor_heartbeat`; partitioning comes when volumes need it |
 | Workflow | `shift_instance`, `workflow_request`, `operator_input`, `clarification`, `ocap_recommendation`, `acknowledgment`, `manager_guidance` | `UNIQUE (event_id, shift_instance_id)`. **Built** (migration 0009, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)): `shift_instance`, `workflow_request`, `workflow_entry` (the reason, answers, guidance and acknowledgment in one append-only table, in place of `operator_input`, `clarification`, `manager_guidance` and `acknowledgment`), `workflow_settings` (the follow-up questions, append-only); `ocap_recommendation` comes with OCAP |
 | OCAP | `ocap_document`, `ocap_version`, `ocap_section`, `ocap_chunk` | Status Draft / Active / Suspended / Superseded; chunk holds the embedding |
@@ -681,7 +684,7 @@ PostgreSQL 17+ with pgvector. All timestamps `timestamptz` in UTC.
 | Column | Type | Purpose |
 |---|---|---|
 | `id` | uuid v7 | Time-ordered, set before first write |
-| `line_id`, `parameter_id`, `sku_id` | FK | What was monitored |
+| `line_id`, `parameter_id`, `zone_id` | FK | What was monitored |
 | `kind` | `HMI_MISMATCH` \| `ACTUAL` | Rule family |
 | `raw_target`, `raw_hmi`, `raw_actual` | numeric | Raw decimals as evidence |
 | `config_version_id`, `mapping_version_id` | FK | Config it was judged against |
@@ -724,13 +727,14 @@ backups off-host.
 
 ## 11. API contract
 
-One REST API under `/api/v1` plus one WebSocket at `/api/v1/ws`.
+One REST API under `/api/v1`. The SDD's WebSocket at `/api/v1/ws` isn't built: on one line the pages poll ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)).
 
 ### Conventions
 
-- JSON bodies; timestamps ISO 8601 UTC ending in `Z`.
+- JSON bodies; timestamps ISO 8601 UTC ending in `Z` (**built**, [ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md): one formatter, `centerline_common.isotime`).
 - Cursor pagination on lists.
-- `Idempotency-Key` header required on every POST that creates a record.
+- `Idempotency-Key` header required on every POST that creates a record (**built**, [ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)): the answer is kept
+  24 h and replayed for the same key; signing in and the POSTs that save nothing are exempt.
 - `version` field for optimistic locking on configuration.
 - Errors as **RFC 9457** problem details (`application/problem+json`).
 - Exports are background jobs (`POST /exports` → poll `GET /exports/{id}`).
@@ -747,12 +751,12 @@ One REST API under `/api/v1` plus one WebSocket at `/api/v1/ws`.
 | Workflow (built, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) | `GET /workflow/requests` (an operator: the shift's; others: the open ones and the last day's), `GET /workflow/requests/{id}`; `POST /workflow/requests/{id}/reason`, `/answers`, `/acknowledge`; `/ocap-choice` comes with OCAP; the follow-up questions: `GET`/`PUT /config/workflow` | Every role reads; the shift's operator writes; questions: Manager and Administrator read, Administrator changes |
 | Guidance (built, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) | `POST /workflow/requests/{id}/guidance` | Manager |
 | OCAP | `POST /ocaps`, `POST /ocaps/{id}/versions`, `/activate`, `/suspend`; `GET /ocaps/search` | Manager; search all |
-| Rules (built, [ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md)) | `GET /config/rules`, `GET /config/rules/proposal`; `GET`/`POST /config/versions`, `POST /config/versions/check`, `POST /config/versions/{n}/activate`, `POST /config/activations/{id}/cancel`; `POST`/`PUT`/`DELETE /config/skus` | Read: Manager, Administrator. Change: Manager ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) |
+| Rules (built, [ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md)) | `GET /config/rules`, `GET /config/rules/proposal`; `GET`/`POST /config/versions`, `POST /config/versions/check`, `POST /config/versions/{n}/activate`, `POST /config/activations/{id}/cancel` | Read: Manager, Administrator. Change: Manager ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) |
 | Mappings (built, [ADR-0013](decisions/ADR-0013-tag-mappings.md)) | `GET /config/mappings`; `GET`/`POST /config/mappings/versions`, `POST /config/mappings/versions/check`, `POST /config/mappings/versions/{n}/activate` (an older one is a rollback), `GET /config/mappings/versions/{n}/export.csv`; `POST /config/mappings/activations/{id}/cancel`; `POST /config/mappings/import`, `POST /config/mappings/discover` | Read: Manager, Administrator. Change, import included: Administrator ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) |
 | Monitoring control (built, [ADR-0017](decisions/ADR-0017-monitoring-control.md)) | `GET /monitoring/control`; `POST /monitoring/switch` (a zone or a parameter's zones, off with a reason, or on); `GET`/`POST /maintenance`, `POST /maintenance/{id}/extend`, `/end` | Every role reads; switching: Manager; maintenance: Administrator |
 | Notifications (built, [ADR-0023](decisions/ADR-0023-notifier.md)) | `GET /notifications` (filters, cursor paging), `GET /notifications/{id}`; `POST /notifications/test`, `POST /deliveries/{id}/redrive`; routing: `GET /config/routing`, `/config/routing/proposal`, `GET`/`POST /config/routing/versions`, `/check`, `/{n}/activate`, `POST /config/routing/activations/{id}/cancel`; channels: `PUT /config/connections/notifications`, `POST …/email-test` | Read: Manager, Administrator. TEST, re-drive, routing and channels: Administrator |
 | Accounts (built, [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) | `GET`/`POST /users`, `PUT /users/{id}` (no delete: accounts are disabled), `POST /users/{id}/temporary-password` | Administrator |
-| Analytics | `POST /analytics/query`; `GET`/`POST /analytics/ranges`, `POST /analytics/ranges/{v}/activate` | Manager + Administrator ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)); ranges Administrator |
+| Analytics (built) | `GET /analytics/options`, `POST /analytics/query`; ranges ([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)): `GET /config/analytics-ranges`, `…/template.csv`, `…/versions/{n}`, `…/versions/{n}/original.csv`; `POST …/versions/check`, `…/versions`, `…/versions/{n}/activate`, `…/activations/{id}/cancel` | Manager + Administrator ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)); ranges changed by an Administrator |
 | Configuration (built, [ADR-0011](decisions/ADR-0011-configuration-page.md)) | `GET /config/connections`; `PUT /config/connections/historian` \| `/mqtt`; `POST /config/connections/historian/test` \| `/mqtt/test`; `GET /config/historian/tags`; `POST /config/historian/latest`; `GET /config/register`; `PUT /config/register/parameters/{id}` | Read: Manager, Administrator. Change: Administrator ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) |
 | Exports | `POST /exports`, `GET /exports/{id}` | Manager, Administrator |
 | Health (built) | `GET /health` (Administrator); `GET /health/live` (no sign-in: for container health checks) | Administrator |
@@ -762,7 +766,6 @@ One REST API under `/api/v1` plus one WebSocket at `/api/v1/ws`.
 ```http
 POST /api/v1/analytics/query
 {
-  "sku": "<SKU code>",
   "shift": "ALL",
   "from": "2026-09-27T00:00:00Z",
   "to":   "2026-09-28T00:00:00Z",
@@ -778,7 +781,7 @@ POST /api/v1/analytics/query
 Response: pairs `(bucket_start, x, y, group)`, per-series counts + descriptive stats,
 exclusion counts by reason, `r`, slope, intercept, R², strength label, direction, warnings.
 
-### WebSocket message types (suggested)
+### WebSocket message types (suggested; not built, ADR-0028)
 
 `event.opened`, `event.updated`, `event.closed`, `workflow.request`, `handover.warning`,
 `draft.purge`, `session.revoked`. Every message carries `type`, `id`, `at` (UTC) and a
@@ -790,7 +793,7 @@ payload; the client treats WS as a hint and refetches via REST on reconnect.
 
 > **Built** ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)): accounts, passwords, sessions and roles as described here, in
 > `services/api/centerline_api/auth/`, with the first Administrator created on the server's command line.
-> The shift-boundary handover (SES-03) followed in Phase 2 ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)). Still to come: HTTPS through the proxy, and closing WebSockets.
+> The shift-boundary handover (SES-03) followed in Phase 2 ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)). Still to come: HTTPS through the proxy. There are no WebSockets to close ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)).
 
 ### Accounts and passwords (IAM-02…04)
 
@@ -799,8 +802,8 @@ payload; the client treats WS as a hint and refetches via REST on reconnect.
 - Argon2id; min 12 chars; checked against an **offline** breached-password list; last 5
   passwords blocked; 5 failures → 15 min lockout.
 - Temporary passwords expire in 24 h and force a change at first login.
-- Role change, disablement or reset **deletes every session row and closes that user's
-  WebSockets immediately** — the reason sessions are server-side, not JWTs (DD-06).
+- Role change, disablement or reset **deletes every session row immediately**, so the next request of any of
+  them is refused — the reason sessions are server-side, not JWTs (DD-06).
 
 ### Sessions
 
@@ -826,7 +829,7 @@ account has only that role, because its session rules differ.
 | Critical acknowledgment; brief-change mode; OCAP upload/activation; event guidance | Manager |
 | Exports | Manager, Administrator |
 | Accounts, temp passwords, legal hold, maintenance, re-drive, TEST messages, Analytics ranges | Administrator |
-| Rules tab: SKUs, targets, limits, delays | Manager |
+| Rules tab: targets, limits, delays | Manager |
 | Connections, Tags and Mappings, mapping import included | Administrator |
 | Monitoring disable (MON-01) | Manager |
 | Analytics access | Manager, Administrator |
@@ -872,7 +875,7 @@ redundancy. A single 4 h restore consumes a month's budget → keep a **pre-stag
 | Broker connection lost | Pause at once (keep-alive 5 s); retry 5 s for 1 min, then 30 s | Resume after a live message from every area | OPC-03/05 |
 | Edge publisher stops (broker up) | Area silent past its threshold → pause; a liveness/Last Will topic, if the edge provides one, pauses sooner | Resume after a live message from every area | OPC-03/05 |
 | Plant clocks off (edge −114 s, Timebase −279 s measured) | No effect on evaluation (own clock); skew warning on the health page | NTP fix by OT/IT (O-18) | DEP-06 |
-| SKU unavailable | Pause evaluation + timers, keep open events, alert Management | Fresh valid snapshot | OPC-08 |
+| Rules incomplete (a zone without its limits) | Pause evaluation + timers, keep open events, alert Management once | A version that gives every zone its limits, then a fresh valid snapshot | OPC-08 (ADR-0027) |
 | PostgreSQL down | Journal to protected disk (30 min default) | Ordered, idempotent replay | RES-01 |
 | Disk 80 % / 90 % | Warn at 80 %; eligible cleanup at 90 %; protected degraded mode if unresolved | Admin frees space | RES-02 |
 | Ollama down/slow | Template questions, keyword search, no summary | Automatic | AI-01, AT-08 |
@@ -945,7 +948,7 @@ before they are wired to a real backend.
 
 | Area | Prototype today | SDD target | Action |
 |---|---|---|---|
-| Backend | `server/server.js` empty; Node assumed in README | Python/FastAPI, 9 containers | Replace `server/` with `services/` (§4) |
+| Backend | `server/server.js` empty; Node assumed in README | Python/FastAPI, 9 containers | **Done:** `services/` (§4) has the api, monitor-core and the notifier; `server/` removed |
 | Scope | 2 factories · 3 lines · 5 machines, scope selectors | **One line**, 11 URS parameters, 14 active zones | **Done** in the UI ([ADR-0019](decisions/ADR-0019-alarm-pages-live.md)): the plant selectors and Overview are gone. There's no `line_id` in the schema yet: add it when a second line joins |
 | Parameters | 8 named codes (`sealing_temperature`, …), one value each | **P01–P11 with zones** from the register (e.g. P02 Vertical has V1–V6) | **Done** on the live Digital Centerline page ([ADR-0015](decisions/ADR-0015-live-centerline-page.md)): one row per zone from the register, grouped by parameter |
 | HMI mismatch | `hasSetpointDrift` = raw `hmi ≠ target` | **Integer-truncated** comparison, with delay, supersede, brief-change modes | **Done** on the live page: monitor-core's HMI state and countdown; the prototype page is unrouted |
@@ -961,7 +964,7 @@ before they are wired to a real backend.
 | Strength bands | 0.9 / 0.7 / 0.5 / 0.3 on abs r | ANA-13 bands on **unrounded** \|r\|: 0.20 / 0.40 / 0.70 / 0.90 | **Done** in the api (server computes the label) |
 | Shifts | A/B/C at 06/14/22 ✓ | Same, Asia/Manila; Production Date = shift start date | Keep; add `shift_instance` server-side |
 | Auth | `currentUser` fixture | Local accounts, server sessions, role + workstation IP rules | **Done** ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)): sign-in, forced password change, inactivity warning, Accounts page, pages by role; the shift-boundary handover (SES-03, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) |
-| Missing screens | — | Operator workflow (reason → clarifications → OCAP → ack), OCAP admin, notifications/re-drive, users, maintenance, health page, exports, bilingual EN/FIL | Add in their phases. **Done:** users (the Accounts page, [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) and maintenance ([ADR-0017](decisions/ADR-0017-monitoring-control.md)) |
+| Missing screens | — | Operator workflow (reason → clarifications → OCAP → ack), OCAP admin, notifications/re-drive, users, maintenance, health page, exports, bilingual EN/FIL | Add in their phases. **Done:** users (the Accounts page, [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)), maintenance ([ADR-0017](decisions/ADR-0017-monitoring-control.md)), notifications and re-drive ([ADR-0023](decisions/ADR-0023-notifier.md)), and the operator workflow up to a Manager's guidance (the Reasons page, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)); OCAP comes in Phase 3 |
 | Language | English only | English + Filipino (LAN-01) | Introduce i18n early so strings aren't hard-coded twice |
 
 Things worth keeping from the prototype: the three-value (Target / HMI / Actual) mental
@@ -987,9 +990,10 @@ With two developers, Phase 4 can run beside Phases 2–3 (it depends only on the
 
 **Owner decision 2026-09-29:** Phase 4 (Analytics) started **first**, before Phase 1, because it
 depends only on Timebase. Built: Timebase adapter, bucketing and pairing, statistics, Scatter and
-Trend tabs, range-file validation. Still to come for G4: login and roles (with Phase 1), range
-versioning in the database (ANA-11), the SKU filter once the tag exists, and AT-ANA-01…10 on an
-independently calculated dataset.
+Trend tabs, range-file validation; login and roles followed with Phase 1 (ADR-0016). **G4 met on 2026-10-06**
+([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)): the ranges versioned in the database (ANA-11), and AT-ANA-01…10 passing on an independently calculated
+dataset in `tests/acceptance/` (ANA-01…21). AT-ANA-01's "required SKU" goes with the ADR-0027 change request; the
+two tabs' look (AT-ANA-06) and the wording on the page (AT-ANA-10) are checked in a browser; exports wait for O-04.
 
 **Phase 1 started on the simulator on 2026-09-30** (owner decision, ahead of the URS approval
 gate G0a still lists): monitor-core's first slice is built and passes the AT-01…03 scenarios at
@@ -1006,7 +1010,11 @@ the Notifications page shows every delivery, and Administrators send TEST messag
 ([ADR-0023](decisions/ADR-0023-notifier.md)). The channels are placeholders until IT answers O-05. The shift
 handover and the reason workflow followed ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)): one request per HMI mismatch per shift, the reason,
 two fixed follow-up questions, a Manager's guidance and the operator's acknowledgment, the 15-min escalation, and
-the operator's session ending with its shift. Still to come for G2: the WebSocket, and AT-04…06.
+the operator's session ending with its shift. Then, on 2026-10-06 ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)): polling kept instead of the WebSocket
+(O-22), the `Idempotency-Key` and `Z` timestamps built (O-23), and the acceptance suites AT-04…06 in
+`tests/acceptance/`, **all passing** (19 requirements). AT-05 runs on the Manager-guidance path until OCAP exists
+(Phase 3). Still to come for G2's sign-off: AT-06 against the real Teams flow and SMTP relay (O-05), and AT-04's
+cookie and workstation-IP checks behind the HTTPS proxy.
 
 **Phase 0 is under way** (started 2026-09-29): tasks, evidence, gate status and the requests
 to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tracked in
@@ -1016,12 +1024,12 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 
 - [x] `db/migrations`: event + transition tables with immutability triggers (0003), and the services'
       role `centerline_app` (the SDD's `app_rw`, 0006, [ADR-0020](decisions/ADR-0020-database-roles.md)). **Done** (0001, ADR-0012): register
-      versions, SKUs, config versioning and activation, hash-chained audit. The `purge` role comes with
+      versions, config versioning and activation, hash-chained audit. The `purge` role comes with
       retention and legal hold (RET-01/02, Phase 5); reference tables for line, parameter and zones aren't
       needed while the register holds them
 - [x] register and change history in the database (ADR-0012); connections stay files, secrets
       become mounted files with the production stack
-- [x] `tools/mqtt-sim`: register zones, brief changes, clock skew, stale area, SKU field (built)
+- [x] `tools/mqtt-sim`: register zones, brief changes, clock skew, stale area (built)
 - [x] `monitor_core`: read-only subscriber, area freshness, payload parsing, the mapping in effect
       (ADR-0013, ADR-0014)
 - [x] rules: `hmi_matches`, `classify` + boundary tests from the URS examples
@@ -1033,7 +1041,7 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 - [x] heartbeat row + health endpoint (`monitor` in `GET /api/v1/health`)
 - [x] local accounts (Argon2id), server sessions, login in the client ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md))
 - [x] swap `mockApi` functions for real `fetch` calls for the Centerline page: `/centerline` renders the
-      live page (ADR-0015); the Alarms pages still use `mockApi`
+      live page (ADR-0015); the Alarms pages followed ([ADR-0019](decisions/ADR-0019-alarm-pages-live.md))
 
 ---
 
@@ -1043,12 +1051,12 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 
 | ID | Assumption | Affects |
 |---|---|---|
-| A-01 | Targets + Actual limits configured in-app per SKU × parameter (optional zone override); the MQTT payload supplies only SKU, setpoints, actuals | Config model, OPC-01, HMI-01. **Confirmed** 2026-09-30 (ADR-0012) |
+| A-01 | Targets + Actual limits configured in-app per parameter, with zone overrides; the MQTT payload supplies only setpoints and actuals | Config model, OPC-01, HMI-01. **Confirmed** 2026-09-30 (ADR-0012), per zone since [ADR-0027](decisions/ADR-0027-no-sku.md) |
 | A-02 | Actual limits are offsets around the raw HMI setpoint, not absolutes | Rule engine, config screens. **Confirmed** 2026-09-30 (ADR-0012) |
 | A-03 | Final Critical escalation 15 min after the 4th repeat: ≤ 6 messages over 75 min | Escalation timers |
 | A-04 | Lightweight = minimal row; Cleared-before-trigger = full evidence; neither notifies nor opens workflow | Storage, screens |
 | A-05 | 15-min workflow escalation clock starts when that shift's request is created | WF-03 timer |
-| A-06 | SKU and shift are historized in Timebase per sample | Analytics filtering |
+| A-06 | The shift is derived from each sample's timestamp (no usable historian shift, ADR-0008) | Analytics filtering |
 | A-07 | Production Date = Manila date the shift starts | Grouping |
 | A-08 | Sample std dev (n − 1) | AT-ANA-05 expected values |
 | A-09 | "Optional voice" = read-aloud output only | Scope |
@@ -1065,7 +1073,7 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 | O-04 | Analytics persistence and export formats | High | Phase 4 |
 | O-05 | Teams IDs, flow schema, trigger auth; SMTP settings | High | Real delivery. Built with placeholders ([ADR-0023](decisions/ADR-0023-notifier.md)): the flow's input is defined, the signed URL and the relay are set on the Connections tab |
 | O-08 | Default mismatch, Warning and Critical delays (only Recovery 15 s is given) | High | **Closed:** accepted by the owner on 2026-10-01: mismatch 30 s, Warning 30 s, Critical 10 s, downgrade 30 s, Recovery 15 s ([ADR-0002](decisions/ADR-0002-default-delays.md)); the limits wait for process engineering |
-| O-09 | Open events on SKU changeover | High | **Closed:** [ADR-0001](decisions/ADR-0001-sku-changeover.md) |
+| O-09 | Open events on SKU changeover | High | **Closed:** no changeover, there's no SKU ([ADR-0027](decisions/ADR-0027-no-sku.md), superseding ADR-0001) |
 | O-06 | Historian shift values vs timestamp-derived shift | Medium | **Closed:** timestamp-derived (no usable historian shift; `Volpak_Shift` is a counter), [ADR-0008](decisions/ADR-0008-analytics-on-timebase.md) |
 | O-07 | Analytics visual details from the reference UI | Medium | Phase 4 |
 | O-10 | Which 10 groups show for Production Date grouping | Medium | Proposed default in place: the 10 most recent (ADR-0008); confirm |
@@ -1073,13 +1081,15 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 | O-12 | What stops/continues in protected degraded mode | Medium | Phase 5 |
 | O-13 | Who may disable monitoring, import mappings, open Analytics | Medium | **Closed:** [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md): disabling is the Manager's; mappings (import included) the Administrator's; Analytics both |
 | O-14 | Broker host, port, TLS/CA, Centerline account and ACL, publish mode and maximum interval, liveness topic, broker availability | High | Real-broker connection (G0b). TLS, the account and the ACL are accepted as they are for now ([ADR-0021](decisions/ADR-0021-g0b-revised.md)); questions in [tools/mqtt-probe](../tools/mqtt-probe/README.md); answers are entered and tested on the Configuration page ([ADR-0011](decisions/ADR-0011-configuration-page.md)) |
-| O-15 | SKU/recipe tag for the Volpak, in the machine payload and so in Timebase ([ADR-0007](decisions/ADR-0007-parameter-register.md)) | **High** | Deferred by the owner until the tag is ready; connecting no longer needs it ([ADR-0021](decisions/ADR-0021-g0b-revised.md)). Meanwhile a placeholder SKU judges actual values, and HMI setpoints where a Manager gives it targets ([ADR-0022](decisions/ADR-0022-placeholder-sku.md), amended 2026-10-02). HMI mismatch on the real machine; the Analytics SKU filter (ANA-05, [ADR-0008](decisions/ADR-0008-analytics-on-timebase.md)) |
+| O-15 | SKU/recipe tag for the Volpak | — | **Dropped:** Centerline has no SKU ([ADR-0027](decisions/ADR-0027-no-sku.md)) |
 | O-16 | Missing tags: P01, P05, P07; P08 setpoint; P10 actual; P11 setpoint | Medium | Monitoring those parameters |
 | O-17 | P09 comparison rule: 1 decimal instead of whole numbers (deviates from HMI-01) | High | P09 monitoring |
 | O-18 | NTP on the edge publisher (−114 s) and the Timebase server (−279 s) | High | Aligning events with history; go-live |
 | O-19 | P09 `Pressure_Setpoint` / `Pressure_Actual` look swapped at the source; confirm on the HMI | High | P09 monitoring |
 | O-20 | Actual rules while the machine is stopped | High | **Closed:** pause while stopped, 30 min warm-up after stops ≥ 10 min ([ADR-0010](decisions/ADR-0010-pause-actual-rules-when-stopped.md)) |
 | O-21 | If an area goes silent during long stops (Timebase showed Dosing silent for up to 34 min), the line-wide snapshot gate pauses HMI mismatch monitoring too, which ADR-0010 wants to keep running. Capture a long stop on the broker, then decide: accept it, or gate per area | Medium | HMI monitoring during long stops ([ADR-0006](decisions/ADR-0006-mqtt-acquisition.md)) |
+| O-22 | Live updates: the WebSocket at `/api/v1/ws` with `LISTEN/NOTIFY` (§5, §11), or the polling built so far | High | **Closed** 2026-10-06: polling on one line; the WebSocket only with a second line or a measured need ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)) |
+| O-23 | `Idempotency-Key` on creating POSTs and timestamps ending in `Z` (§11) | Medium | **Closed** 2026-10-06: both built ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)) |
 
 Until an O-item closes, implement the affected value as **configuration with a clearly
 marked placeholder default**, never as a hard-coded constant.
@@ -1096,7 +1106,8 @@ marked placeholder default**, never as a hard-coded constant.
   stale-area, retained-message and clock-skew scenarios (ADR-0006).
 - **Acceptance:** AT-xx suites mapped below; each phase gate runs its suite.
 - Tag tests with the URS IDs they cover (e.g. `@pytest.mark.urs("HMI-03")`) so a coverage
-  report can be generated per URS group.
+  report can be generated per URS group. **Built** for the acceptance suites ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)): the run ends with the
+  requirements that passed, failed or were skipped.
 
 | URS group | Components | Guide § | Acceptance tests |
 |---|---|---|---|

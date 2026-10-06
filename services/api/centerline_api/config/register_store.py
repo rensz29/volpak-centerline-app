@@ -80,6 +80,22 @@ class RegisterStore:
                      details={"to": number})
         return number
 
+    def drop_sku(self, conn) -> str | None:
+        """A register saved before ADR-0027 names a SKU tag (none was ever set). The next version leaves it out,
+        and the file follows; returns that version's number, or None when there's nothing to drop. Commits."""
+        cur = self.current(conn)
+        if "sku" not in cur["content"]:
+            return None
+        raw = deepcopy(cur["content"])
+        raw.pop("sku")
+        raw["version"] = self.next_number(conn)
+        self._insert(conn, raw, "No SKU tag: Centerline doesn't use one (ADR-0027)")
+        audit.record(conn, "register.version", f"Register {raw['version']}: the unused SKU entry removed (ADR-0027)",
+                     details={"from": cur["number"], "to": raw["version"]})
+        conn.commit()
+        self.export(conn, raw)
+        return raw["version"]
+
     def file_status(self, conn) -> str | None:
         """None when the file matches the database; otherwise why it doesn't. Refreshes an out-of-date export."""
         cur = self.current(conn)

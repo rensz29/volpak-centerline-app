@@ -88,7 +88,7 @@ export function RequestCard({
           </p>
           <p className="text-ink-soft mt-0.5">
             HMI setpoint <b className="text-warning">{withUnit(e.hmi, e.unit)}</b> against the target {withUnit(e.target, e.unit)} · since{' '}
-            {at(e.openedAt)} · SKU {e.sku}
+            {at(e.openedAt)}
           </p>
           <p className="text-ink-muted mt-0.5 text-[12px]">{r.shift.label}</p>
         </div>

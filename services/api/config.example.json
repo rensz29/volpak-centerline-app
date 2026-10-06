@@ -12,8 +12,7 @@
     "min_coverage": 0.5,
     "use_heartbeat": true,
     "heartbeat_gap_s": 120,
-    "fetch_window_s": 21600,
-    "ranges_csv": null
+    "fetch_window_s": 21600
   },
   "database": {
     "host": "127.0.0.1",

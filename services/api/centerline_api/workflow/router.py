@@ -35,7 +35,7 @@ TEXT_MAX = 2000
 NEXT = {"waiting_reason": "reason", "waiting_answers": "answers", "waiting_guidance": "guidance",
         "waiting_acknowledgment": "acknowledgment"}
 COLUMNS = """r.id, r.event_id, r.status, r.created_at, r.escalated_at, r.closed_at, s.code AS shift_code, s.starts_at,
-             s.ends_at, s.production_date, e.kind, e.parameter_id, e.zone_id, e.sku_code, e.opened_at, e.raw_hmi,
+             s.ends_at, s.production_date, e.kind, e.parameter_id, e.zone_id, e.opened_at, e.raw_hmi,
              e.raw_target, st.open AS event_open, st.state AS event_state"""
 FROM = """FROM workflow_request r JOIN shift_instance s ON s.id = r.shift_instance_id
           JOIN event e ON e.id = r.event_id JOIN event_state st ON st.event_id = e.id"""
@@ -71,7 +71,7 @@ def _view(r: dict, entries: list[dict], names: dict) -> dict:
             "shift": {"code": shift.code, "label": shifts.label(shift), "startsAt": iso(shift.starts_at), "endsAt": iso(shift.ends_at)},
             "event": {"id": str(r["event_id"]), "channel": ch, "parameterId": r["parameter_id"], "zoneId": r["zone_id"],
                       "parameterName": zone.get("parameterName"), "zoneName": zone.get("zoneName"), "unit": zone.get("unit"),
-                      "sku": r["sku_code"], "openedAt": iso(r["opened_at"]), "hmi": _num(r["raw_hmi"]),
+                      "openedAt": iso(r["opened_at"]), "hmi": _num(r["raw_hmi"]),
                       "target": _num(r["raw_target"]), "open": r["event_open"], "state": r["event_state"]},
             "entries": [{"kind": e["kind"], "at": iso(e["at"]), "by": e["by_user"], "question": e["question"], "body": e["body"]}
                         for e in entries]}
@@ -139,7 +139,7 @@ def _locked(conn, request_id, step: str, operator: bool, now) -> dict:
         raise Problem(409, "request-closed", "This request is closed",
                       {"done": "It's done.", "not_answered": "Its shift ended before it was finished.",
                        "resolved": "Its HMI setpoint is back on target.", "superseded": "A newer mismatch on the zone replaced it.",
-                       "cancelled": "Its event was closed (a SKU changeover, or the zone switched off)."}[r["status"]])
+                       "cancelled": "Its event was closed: the zone was switched off."}[r["status"]])
     if NEXT[r["status"]] != step:
         raise Problem(409, "wrong-step", "That isn't this request's next step",
                       f"It's waiting for the {NEXT[r['status']]} now. Reload the page.", next=NEXT[r["status"]])

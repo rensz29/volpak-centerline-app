@@ -2,7 +2,8 @@
 
 - **Status:** Accepted. Decision 6 amended by [ADR-0015](ADR-0015-live-centerline-page.md): the heartbeat is written
   every 2 s and carries every zone's values and states for the Digital Centerline page
-  Decision 1 corrected on 2026-10-01: the retry timing and the payload clock in the evidence
+  Decision 1 corrected on 2026-10-01: the retry timing and the payload clock in the evidence.
+  Amended by [ADR-0027](ADR-0027-no-sku.md) (2026-10-05): the gate checks no SKU, and there's no changeover
 - **Date:** 2026-09-30
 - **Decider:** Szyrelle (system owner)
 - **Related:** [ADR-0001](ADR-0001-sku-changeover.md) (changeover), [ADR-0006](ADR-0006-mqtt-acquisition.md) (MQTT),

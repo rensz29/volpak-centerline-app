@@ -26,8 +26,8 @@ It takes everything from the Configuration page:
 |---|---|
 | Connections | The broker, its topic filters, and each area's freshness limit (`config/connections.json`) |
 | Tags | The register: which zones are monitored and with which tags |
-| Mappings | The mapping in effect: each tag's topic and field, and the SKU field or a placeholder SKU (ADR-0022) |
-| Rules | The rules in effect: targets per SKU and zone, limits, delays, the stop pause |
+| Mappings | The mapping in effect: each tag's topic and field |
+| Rules | The rules in effect: each zone's target, limits and delays, and the stop pause (ADR-0027) |
 | Live page, Maintenance page | Zones a Manager switched off, and maintenance windows not ended (read every 2 s, ADR-0017) |
 
 A zone switched off isn't judged: its open events close as "Monitoring disabled", with no
@@ -38,8 +38,9 @@ and Management gets one `system` alert.
 
 If a piece is missing, it keeps running but doesn't judge. The heartbeat says why,
 and so does `GET /api/v1/health` under `monitor`. For example: "No rules are in
-effect", "No SKU field is mapped yet (O-15)", or "SKU X has no complete rules in
-effect".
+effect", or "The rules in effect don't give every zone its Warning and Critical
+limits". That last one, alone, also alerts Management once (OPC-08). A zone without a
+target is judged on its actual value only; the live page shows its HMI as "Not judged".
 
 ## Run
 
@@ -57,12 +58,11 @@ from `CENTERLINE_MONITOR_CONFIG`, or `monitor_core/config.json` if present:
 
 Without a file it uses the development database and `config/`.
 
-> **On this laptop the saved broker is the plant broker.** Run monitor-core
-> against it only once G0b is met: the host test on the control-room PC, and M7
-> unless the owner takes it out ([ADR-0021](../../docs/decisions/ADR-0021-g0b-revised.md)).
-> Until the SKU field exists, set a placeholder SKU in the mapping: actual values are then
-> judged, and HMI setpoints where the Rules tab gives the placeholder targets
-> ([ADR-0022](../../docs/decisions/ADR-0022-placeholder-sku.md), amended 2026-10-02).
+> **On this laptop the saved broker is the plant broker.** Since 2026-10-02 the real
+> application judges the real machine from here, on the real database, read-only
+> ([ADR-0026](../../docs/decisions/ADR-0026-real-app-on-the-real-machine.md)). What it writes is
+> permanent. G0b still gates the control-room PC: the host test, and M7 unless the owner
+> takes it out ([ADR-0021](../../docs/decisions/ADR-0021-g0b-revised.md)).
 >
 > For development, point it at a scratch config folder whose `connections.json`
 > names a local Mosquitto fed by `tools/mqtt-sim`, and at a scratch database.
@@ -90,27 +90,27 @@ and emptied. A restart replays the last run's journal before anything else. Past
 | `event`, `event_transition` | Each event, pinned to its versions, and every change of state (append-only) |
 | `event_state` | Each event's current state |
 | `lightweight_change` | Brief setpoint changes (HMI-05) |
-| `notification` | The outbox: initial, escalation, repeats, recovery, changeover, system alerts, overdue reason requests. Delivered by the notifier (ADR-0023) |
+| `notification` | The outbox: initial, escalation, repeats, recovery, system alerts, overdue reason requests. Delivered by the notifier (ADR-0023) |
 | `shift_instance`, `workflow_request` | Each shift with something on record; a reason request per HMI mismatch per shift, opened and closed with its event, escalated after 15 min, closed as not answered at the shift's end (ADR-0025) |
 | `scheduled_action` | Every delay, repeat and warm-up timer. Pending ones are abandoned on a restart, because timers restart from zero (MNT-02) |
 | `pause_period` | When judging stopped (`line`), or Actual rules paused for a stop (`actual`), and why |
 | `event_acknowledgment` | Written by the api when a Manager acknowledges; stops a Critical's repeats (ACT-04). Each counts for the Critical period it was given in; one given while monitor-core is down is applied when it restarts, and none twice (ADR-0016) |
-| `monitor_heartbeat` | Every 2 s: whether it's judging, why not, the SKU, and each zone's values, bands, states and pending delays, with the rules version each check judges by. The Digital Centerline page reads it (ADR-0015) |
+| `monitor_heartbeat` | Every 2 s: whether it's judging, why not, and each zone's values, bands, states and pending delays, with the rules version each check judges by. The Digital Centerline page reads it (ADR-0015) |
 
 ## Tests
 
 ```bash
-cd services && .venv/bin/python -m pytest monitor_core/tests   # 69 tests; the database and Mosquitto ones need them running
+cd services && .venv/bin/python -m pytest monitor_core/tests   # 65 tests; the database and Mosquitto ones need them running
 ```
 
 | File | Covers |
 |---|---|
 | `test_monitor_rules.py` | HMI truncation and the Actual boundaries, from the URS examples |
-| `test_monitor_engine.py` | The AT-01…03 scenarios against a simulated line and clock; the stop pause, SKU changeover, rule pinning |
+| `test_monitor_engine.py` | The AT-01…03 scenarios against a simulated line and clock; the stop pause, rule pinning; incomplete rules, and a zone without a target (ADR-0027) |
 | `test_monitor_store.py` | One transaction per step and safe replays; append-only evidence; restart; acknowledgment; database outage |
 | `test_monitor_control.py` | Zones switched off and on again; zone and line maintenance windows, overdue, and the resume on fresh data (ADR-0017) |
 | `test_monitor_journal.py` | The disk journal: every effect kept exactly and in order, permissions, a torn last line, the pause past 30 min (ADR-0018) |
-| `test_monitor_placeholder.py` | A placeholder SKU: actual values judged and HMI not, its targets judging their zones' HMI setpoints, missing limits, the changeover when the field arrives (ADR-0022) |
+| `test_monitor_config.py` | The rules in effect, read from the database; targets optional, limits not; a rule pinned before ADR-0027 still loads |
 | `test_monitor_mqtt.py` | The subscriber can't publish and leaves no Last Will, and no code in monitor-core sends (ADR-0006 M6) |
 | `test_monitor_workflow.py` | Reason requests: made with an HMI mismatch and closed with it, none for Actual events, the 15-min escalation once, not answered at the shift's end (ADR-0025) |
-| `test_monitor_e2e.py` | Mosquitto, the simulator, the service loop and PostgreSQL, with the SKU field and with a placeholder |
+| `test_monitor_e2e.py` | Mosquitto, the simulator, the service loop and PostgreSQL |

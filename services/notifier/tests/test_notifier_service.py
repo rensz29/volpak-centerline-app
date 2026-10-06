@@ -15,7 +15,7 @@ from .conftest import ALL_TYPES, SIG, notify, use_routing, write_channels
 ROUTING = [{"name": "Management on Teams", "types": ALL_TYPES, "channel": "teams", "targets": ["Centerline alerts"]},
            {"name": "Management by email", "types": ALL_TYPES, "channel": "email", "targets": ["boss@plant.test"]}]
 CRITICAL = {"kind": "Actual Critical", "parameter": "P03", "parameterName": "Bottom Temperature", "zone": "REAR",
-            "zoneName": "Rear", "unit": "°C", "sku": "67890123", "actual": "191", "hmi": "180"}
+            "zoneName": "Rear", "unit": "°C", "actual": "191", "hmi": "180"}
 
 
 class Clock:

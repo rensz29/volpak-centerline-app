@@ -1,7 +1,7 @@
 # Development database (ADR-0012)
 
 PostgreSQL 17 with pgvector, the SDD's database, for this PC. The Configuration
-page keeps the register, the monitoring rules, the SKUs and the audit log here.
+page keeps the register, the monitoring rules, the tag mappings and the audit log here.
 Analytics works without it.
 
 ## Start and stop
@@ -36,9 +36,8 @@ docker compose -f deploy/dev/compose.yaml stop       # stop, keeping the data
 | Table | Holds |
 |---|---|
 | `register_version` | Every version of the parameter register |
-| `config_version`, `sku_parameter_rule` | Every rules version and its rows |
+| `config_version`, `parameter_rule` | Every rules version and its rows: a zone's, or every zone of a parameter's (ADR-0027) |
 | `config_activation` | When each version took, or will take, effect |
-| `sku` | The SKU list |
 | `audit_log` | Every configuration change, hash-chained. `SELECT audit_log_verify()` returns NULL when intact |
 | `notification`, `notification_route`, `notification_delivery`, `delivery_attempt`, `routing_version` | The outbox, how each message was routed, its deliveries and every attempt, the routing versions ([ADR-0023](../../docs/decisions/ADR-0023-notifier.md)) |
 
@@ -62,7 +61,7 @@ Then on Configuration → Connections → Notifications set the flow URL
 
 ## Reset (development only)
 
-This deletes every rules version, SKU and audit entry on this PC. On the next
+This deletes every rules version, mapping, event and audit entry on this PC. On the next
 start the api imports the register file and the old history again.
 
 ```bash

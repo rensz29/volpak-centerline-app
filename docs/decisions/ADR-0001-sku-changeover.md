@@ -1,6 +1,6 @@
 # ADR-0001 — Open events when the SKU changes
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0027](ADR-0027-no-sku.md) on 2026-10-05: Centerline has no SKU, so nothing closes as a changeover
 - **Date:** 2026-09-28
 - **Decider:** Szyrelle (system owner)
 - **Closes:** O-09

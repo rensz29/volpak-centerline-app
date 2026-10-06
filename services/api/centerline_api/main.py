@@ -16,6 +16,7 @@ from dataclasses import replace
 
 from centerline_common.db import DatabaseUnavailable
 from centerline_common.historian import TimebaseClient, TimebaseError
+from centerline_common import isotime
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -30,10 +31,13 @@ from .config.mapping_router import router as mapping_router
 from .config.mapping_store import MappingStore
 from .config.register_store import RegisterStore
 from .config.router import router as config_router
+from .config.ranges_router import router as ranges_router
+from .config.ranges_store import RangesStore
 from .config.routing_router import router as routing_router
 from .config.routing_store import RoutingStore
 from .config.rules_router import router as rules_router
 from .config.rules_store import RulesStore
+from .idempotency import HEADER as IDEMPOTENCY_HEADER, Idempotency
 from .config.store import ConnectionsStore
 from .monitoring.control import router as control_router
 from .monitoring.router import router as monitoring_router
@@ -51,17 +55,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.rules_store = RulesStore()
     app.state.mapping_store = MappingStore()
     app.state.routing_store = RoutingStore()
+    app.state.ranges_store = RangesStore()
     app.state.passwords = Passwords(settings.auth)
     database.start(app)  # loads app.state.register, from the database or, without it, from the file
     connections = ConnectionsStore(settings.config_dir, settings.timebase, app.state.register.namespace)
     app.state.connections = connections
     # Historian settings saved on the Configuration page win over the api config file.
     app.state.settings = replace(settings, timebase=connections.historian_client_config())
+    app.add_middleware(Idempotency)  # inside GZip: it keeps answers uncompressed
     app.add_middleware(GZipMiddleware, minimum_size=2048)
     app.add_middleware(CsrfGuard)
     if settings.cors_origins:
         app.add_middleware(CORSMiddleware, allow_origins=list(settings.cors_origins),
-                           allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type", CSRF_HEADER])
+                           allow_methods=["GET", "POST", "PUT", "DELETE"], allow_headers=["Content-Type", CSRF_HEADER, IDEMPOTENCY_HEADER])
     problems.install(app)
 
     @app.get("/api/v1/health/live", tags=["health"], summary="The api answers: for container health checks, no sign-in")
@@ -83,15 +89,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                       "auditChain": "intact" if broken is None else f"broken at entry {broken}"}
                 # monitor-core beats every 2 s; stale after 60 s (guide §6.7)
                 monitor = None if beat is None else {
-                    "instance": beat["instance"], "beatAt": beat["beat_at"].isoformat(), "ageS": round(float(beat["age"]), 1),
+                    "instance": beat["instance"], "beatAt": isotime.iso(beat["beat_at"]), "ageS": round(float(beat["age"]), 1),
                     "alive": float(beat["age"]) < 60, "judging": beat["status"].get("judging"),
-                    "reasons": beat["status"].get("reasons"), "sku": beat["status"].get("sku"),
+                    "reasons": beat["status"].get("reasons"),
                     "clockSkewS": beat["status"].get("clockSkewS"), "clockSkewWarning": beat["status"].get("clockSkewWarning")}
                 # the notifier beats every 2 s too (ADR-0023)
                 nb = conn.execute("""SELECT instance, beat_at, status, extract(epoch FROM clock_timestamp() - beat_at) AS age
                                        FROM notifier_heartbeat ORDER BY beat_at DESC LIMIT 1""").fetchone()
                 notifier = None if nb is None else {
-                    "instance": nb["instance"], "beatAt": nb["beat_at"].isoformat(), "ageS": round(float(nb["age"]), 1),
+                    "instance": nb["instance"], "beatAt": isotime.iso(nb["beat_at"]), "ageS": round(float(nb["age"]), 1),
                     "alive": float(nb["age"]) < 60, "lanes": nb["status"].get("lanes"), "backlog": nb["status"].get("backlog")}
                 db["activeRouting"] = request.app.state.routing_store.active_rules(conn)[0]
         except DatabaseUnavailable as e:
@@ -119,6 +125,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(rules_router)
     app.include_router(mapping_router)
     app.include_router(routing_router)
+    app.include_router(ranges_router)
     app.include_router(notifications_router)
     app.include_router(workflow_router)
     app.include_router(monitoring_router)

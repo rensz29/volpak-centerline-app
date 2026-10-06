@@ -6,7 +6,7 @@ import type { WorkflowRequest } from './workflowApi'
  * Measured values are decimal strings, as recorded (HMI-01).
  */
 
-/** NO_TARGET: under a placeholder SKU there's no target, so the HMI setpoint isn't judged (ADR-0022) */
+/** NO_TARGET: the rules give the zone no target, so its HMI setpoint isn't judged (ADR-0027) */
 export type HmiState = 'AT_TARGET' | 'PENDING' | 'OPEN' | 'NO_TARGET'
 export type Severity = 'NORMAL' | 'WARNING' | 'CRITICAL'
 
@@ -57,10 +57,6 @@ export interface MonitorStatus {
   alive: boolean
   judging?: boolean
   reasons?: string[]
-  sku?: string | null
-  skuSeen?: string | null
-  /** The mapping's placeholder SKU, if one stands in for the SKU field (ADR-0022) */
-  skuPlaceholder?: string | null
   connected?: boolean
   actualPaused?: boolean
   stop?: 'unknown' | 'running' | 'stopped' | 'warmup'
@@ -79,7 +75,6 @@ export interface MonitorEvent {
   parameterName: string
   zoneName: string
   unit: string | null
-  sku: string
   openedAt: string
   state: string
   severity: Severity | null
@@ -189,7 +184,6 @@ export interface BriefChange {
   parameterName: string
   zoneName: string
   unit: string | null
-  sku: string
   mode: 'lightweight' | 'cleared_before_trigger'
   startedAt: string
   endedAt: string

@@ -20,7 +20,6 @@ GroupBy = Literal["NONE", "SHIFT", "PRODUCTION_DATE"]
 class AnalyticsQuery(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    sku: str | None = Field(None, description="SKU filter; rejected while the register has no SKU tag (ADR-0008)")
     shift: Shift = "ALL"
     from_: AwareDatetime = Field(alias="from", description="UTC, e.g. 2026-09-28T00:00:00Z")
     to: AwareDatetime

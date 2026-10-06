@@ -1,4 +1,4 @@
-"""Monitoring rules endpoints (ADR-0012): versions, activation and SKUs.
+"""Monitoring rules endpoints (ADR-0012, ADR-0027): versions and activation.
 
 SDD §10 names them GET/POST /config/versions and POST /config/versions/{id}/activate.
 Managers and Administrators read them, and only Managers change them (ADR-0016).
@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, Request
 
 from ..auth.deps import MANAGER_ONLY, PRIVILEGED
 from ..database import connect
-from .models import ActivateIn, CancelIn, RulesVersionIn, SkuIn, SkuRenameIn
+from .models import ActivateIn, CancelIn, RulesVersionIn
 
 router = APIRouter(prefix="/api/v1/config", tags=["rules"], dependencies=[PRIVILEGED])
 
@@ -23,7 +23,7 @@ def _overview(request: Request, conn) -> dict:
     return request.app.state.rules_store.overview(conn, register) | {"registerVersion": register.version}
 
 
-@router.get("/rules", summary="Rules in effect, scheduled activations, every version and the SKUs")
+@router.get("/rules", summary="Rules in effect, scheduled activations, every version and what each zone lacks")
 def rules_overview(request: Request, conn=Depends(connect)) -> dict:
     return _overview(request, conn)
 
@@ -33,7 +33,7 @@ def rules_proposal(request: Request) -> dict:
     return request.app.state.rules_store.proposal()
 
 
-@router.get("/versions/{number}", summary="One rules version with its SKU readiness")
+@router.get("/versions/{number}", summary="One rules version, with what each zone lacks")
 def get_version(number: int, request: Request, conn=Depends(connect)) -> dict:
     return request.app.state.rules_store.version(conn, number, request.app.state.register_store.load(conn))
 
@@ -60,20 +60,3 @@ def cancel_activation(activation_id: UUID, body: CancelIn, request: Request, con
     request.app.state.rules_store.cancel(conn, activation_id, body)
     return _overview(request, conn)
 
-
-@router.post("/skus", dependencies=[MANAGER_ONLY], status_code=201, summary="Add a SKU as the machine publishes it")
-def add_sku(body: SkuIn, request: Request, conn=Depends(connect)) -> dict:
-    request.app.state.rules_store.add_sku(conn, body)
-    return _overview(request, conn)
-
-
-@router.put("/skus/{code}", dependencies=[MANAGER_ONLY], summary="Rename a SKU")
-def rename_sku(code: str, body: SkuRenameIn, request: Request, conn=Depends(connect)) -> dict:
-    request.app.state.rules_store.rename_sku(conn, code, body)
-    return _overview(request, conn)
-
-
-@router.delete("/skus/{code}", dependencies=[MANAGER_ONLY], summary="Remove a SKU no saved version uses")
-def delete_sku(code: str, request: Request, reason: str = "", conn=Depends(connect)) -> dict:
-    request.app.state.rules_store.delete_sku(conn, code, reason)
-    return _overview(request, conn)

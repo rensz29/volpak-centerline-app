@@ -1,9 +1,4 @@
 {
-  "sku": {
-    "tag": null,
-    "note": "Decided in ADR-0007: the edge/UNS team adds the running SKU/recipe to the machine's MQTT payload. Until then monitoring pauses on the real machine (OPC-08); development uses tools/mqtt-sim.",
-    "status": "awaiting_tag"
-  },
   "line": {
     "id": "VOLPAK-FILLER",
     "name": "Volpak Filler, Dressings Halal"

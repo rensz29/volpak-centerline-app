@@ -81,7 +81,7 @@ def main() -> int:
 
         run("analyse_delays.py", str(cfg))
         rep = (data / "delay-report.md").read_text()
-        check("No SKU tag yet" in rep, "analysis runs per shift without a SKU tag")
+        check("Each shift is a run" in rep, "analysis runs per shift")
         check("Unreadable in Timebase: `SPC.SetPointTemperatureVertical1`" in rep, "analysis lists the unreadable span")
         check("behaves like a live value" in rep, "analysis flags P09's live-looking setpoint")
         line = next(ln for ln in rep.splitlines() if ln.startswith("Suggested global default"))

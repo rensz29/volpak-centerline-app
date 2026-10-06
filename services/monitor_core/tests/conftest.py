@@ -1,5 +1,5 @@
 """A fresh, migrated database per test, seeded with what monitor-core judges against:
-the test register, a tag mapping and rules in effect for SKU 67890123."""
+the test register, a tag mapping and rules in effect, with every zone's target."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from centerline_common.db import DatabaseConfig, DatabaseUnavailable, uuid7
 from monitor_helpers import BASE, PROPOSED, REG, REGISTER, targets
 
 SERVER = DatabaseConfig()  # only creates and drops the test databases
-SKU = "67890123"
 
 
 @pytest.fixture(scope="session")
@@ -59,15 +58,14 @@ def seed(conn, delays: dict | None = None) -> None:
     conn.execute("INSERT INTO register_version (id, number, content, sha256, reason) VALUES (%s, %s, %s, 'x', 'test')",
                  (rid, raw["version"], Jsonb(raw)))
     mid = uuid7()
-    conn.execute("""INSERT INTO mapping_version (id, number, register_version_id, sku_topic, sku_field, source, sha256, reason)
-                    VALUES (%s, 1, %s, %s, 'SKU_Code', 'test', 'x', 'test')""", (mid, rid, f"{BASE}/SPC"))
+    conn.execute("""INSERT INTO mapping_version (id, number, register_version_id, source, sha256, reason)
+                    VALUES (%s, 1, %s, 'test', 'x', 'test')""", (mid, rid))
     for r in mapping_mod.required(REG):
         area, field = r.tag.split(".", 1)
         conn.execute("INSERT INTO tag_mapping (mapping_version_id, tag, topic, field) VALUES (%s, %s, %s, %s)",
                      (mid, r.tag, f"{BASE}/{area}", field))
     conn.execute("INSERT INTO mapping_activation (id, mapping_version_id, effective_at, reason) VALUES (%s, %s, now() - interval '1 s', 't')",
                  (uuid7(), mid))
-    conn.execute("INSERT INTO sku (code, name) VALUES (%s, 'Test SKU')", (SKU,))
     settings = {"pause_when_stopped": {"enabled": True, "long_stop_min": 10, "warmup_min": 30},
                 "defaults": {"mismatch_delay_s": 30, "warning_delay_s": 30, "critical_delay_s": 10, "recovery_delay_s": 15,
                              "brief_change_mode": "lightweight", "warning_notifications": True, **(delays or {})}}
@@ -75,26 +73,13 @@ def seed(conn, delays: dict | None = None) -> None:
     conn.execute("""INSERT INTO config_version (id, number, register_version_id, settings, sha256, reason)
                     VALUES (%s, 1, %s, %s, 'x', 'test')""", (cid, rid, Jsonb(settings)))
     for pid, (a, b, c, d) in PROPOSED.items():
-        conn.execute("""INSERT INTO sku_parameter_rule (config_version_id, parameter_id, warn_low, warn_high, crit_low, crit_high)
+        conn.execute("""INSERT INTO parameter_rule (config_version_id, parameter_id, warn_low, warn_high, crit_low, crit_high)
                         VALUES (%s, %s, %s, %s, %s, %s)""", (cid, pid, a, b, c, d))
     for z in REG.zones:
-        conn.execute("INSERT INTO sku_parameter_rule (config_version_id, sku_code, parameter_id, zone_id, target) VALUES (%s, %s, %s, %s, %s)",
-                     (cid, SKU, z.parameter_id, z.zone_id, targets()[z.channel]))
+        conn.execute("INSERT INTO parameter_rule (config_version_id, parameter_id, zone_id, target) VALUES (%s, %s, %s, %s)",
+                     (cid, z.parameter_id, z.zone_id, targets()[z.channel]))
     conn.execute("INSERT INTO config_activation (id, config_version_id, effective_at, reason) VALUES (%s, %s, now() - interval '1 s', 't')",
                  (uuid7(), cid))
-    conn.commit()
-
-
-def use_placeholder(conn, code: str = "PLACEHOLDER") -> None:
-    """Mapping v2 in effect: v1's places, no SKU field, and a placeholder SKU in its stead (ADR-0022)."""
-    rid = conn.execute("SELECT id FROM register_version ORDER BY seq DESC LIMIT 1").fetchone()["id"]
-    mid = uuid7()
-    conn.execute("""INSERT INTO mapping_version (id, number, register_version_id, sku_placeholder, source, sha256, reason)
-                    VALUES (%s, 2, %s, %s, 'test', 'x', 'test')""", (mid, rid, code))
-    conn.execute("INSERT INTO tag_mapping (mapping_version_id, tag, topic, field) SELECT %s, tag, topic, field FROM tag_mapping",
-                 (mid,))
-    conn.execute("INSERT INTO mapping_activation (id, mapping_version_id, effective_at, reason) VALUES (%s, %s, now(), 't')",
-                 (uuid7(), mid))
     conn.commit()
 
 

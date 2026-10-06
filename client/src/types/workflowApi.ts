@@ -47,7 +47,6 @@ export interface WorkflowRequest {
     parameterName: string | null
     zoneName: string | null
     unit: string | null
-    sku: string
     openedAt: string
     hmi: string | null
     target: string | null

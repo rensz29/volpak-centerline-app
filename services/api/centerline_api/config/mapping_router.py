@@ -90,6 +90,6 @@ def discover_mapping(body: DiscoverIn, request: Request, conn=Depends(connect)) 
     wanted = {r.tag for r in mapping_mod.required(register)}
     rows = [{"tag": m["tag"], "topic": m["topic"], "field": m["field"]} for m in result["mapped"] if m["tag"] in wanted]
     return {"connected": True, "listenedS": result["listenedS"], "rows": rows,
-            "notSeen": sorted(wanted - {r["tag"] for r in rows}), "skuCandidates": result["skuCandidates"],
+            "notSeen": sorted(wanted - {r["tag"] for r in rows}),
             "topics": [t["topic"] for t in result["topics"]],
             "fields": {t["topic"]: t["fieldNames"] for t in result["topics"]}, "warnings": result["warnings"]}

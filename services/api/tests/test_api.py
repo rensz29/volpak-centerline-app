@@ -21,7 +21,7 @@ def test_options_list_actuals_and_setpoints_of_every_zone(make_client):
     assert by_channel["P02.V1.setpoint"]["label"] == "Vertical 1 · Setpoint"
     assert by_channel["P09.MAIN.setpoint"]["caution"] and by_channel["P09.MAIN.actual"]["caution"]
     assert body["defaults"]["x"].endswith(".actual") and body["defaults"]["x"] != body["defaults"]["y"]
-    assert body["sku"]["available"] is False
+    assert "sku" not in body  # Centerline has no SKU (ADR-0027)
 
 
 def test_setpoint_can_be_analysed_against_its_actual(make_client):
@@ -51,7 +51,7 @@ def test_query_returns_pairs_statistics_and_warnings(make_client, tmp_path):
     assert body["buckets"]["total"] == 720 and body["buckets"]["paired"] > 700
     assert len(body["pairs"]["t"]) == body["buckets"]["paired"]
     assert body["statistics"]["correlation"]["computable"]
-    assert {"NO_SKU_TAG", "NO_RANGES", "HISTORIAN_CLOCK"} <= codes(body)
+    assert {"NO_RANGES", "HISTORIAN_CLOCK"} <= codes(body) and "NO_SKU_TAG" not in codes(body)
     assert "does not prove" in body["note"]
     audit = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
     assert audit[-1]["query"]["x"] == "P02.V1.actual" and "pairs" in audit[-1] and "t" not in audit[-1]
@@ -61,7 +61,7 @@ def test_invalid_queries_are_problem_documents(make_client):
     c = make_client()
     cases = [({**QUERY, "y": "P02.V1.actual"}, "y"), ({**QUERY, "to": "2099-01-01T00:00:00Z"}, "to"),
              ({**QUERY, "from": "2026-07-01T00:00:00Z"}, "from"), ({**QUERY, "x": "P01.MAIN.actual"}, "x"),
-             ({**QUERY, "sku": "4180"}, "sku"), ({**QUERY, "from": "2026-09-01T18:00:00"}, "from")]
+             ({**QUERY, "from": "2026-09-01T18:00:00"}, "from")]
     for body, field in cases:
         r = c.post("/api/v1/analytics/query", json=body)
         assert r.status_code == 422, (body, r.text)

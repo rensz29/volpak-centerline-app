@@ -1,6 +1,7 @@
 # ADR-0022: A placeholder SKU, judged on actual values (and on HMI where it has targets), until the machine publishes its SKU
 
-- **Status:** Accepted. Decision 2 amended by the owner on 2026-10-02: targets given to the placeholder are judged
+- **Status:** Superseded by [ADR-0027](ADR-0027-no-sku.md) on 2026-10-05: no SKU, so no placeholder; each zone's target is in the rules.
+  (Decision 2 had been amended by the owner on 2026-10-02: targets given to the placeholder are judged.)
 - **Date:** 2026-10-01
 - **Decider:** Szyrelle (system owner)
 - **Amends:** [ADR-0013](ADR-0013-tag-mappings.md) (a mapping version may name a placeholder instead of the SKU

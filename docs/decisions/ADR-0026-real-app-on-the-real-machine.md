@@ -1,6 +1,7 @@
 # ADR-0026: The real application judges the real machine from the development laptop, before G0b
 
-- **Status:** Accepted
+- **Status:** Accepted. Decision 3 amended by [ADR-0027](ADR-0027-no-sku.md) (2026-10-05): no placeholder SKU or SKU list; the targets are
+  each zone's, in the rules
 - **Date:** 2026-10-02
 - **Decider:** Szyrelle (system owner), on 2026-10-02: "5173 on the real machine", chosen over a development
   copy on the simulator, to show the rules working and the alarms on the real application
@@ -76,3 +77,22 @@
   - It held a mapping with the placeholder `123456`, three rules versions, and the owner's first test alarms:
     7 events and 11 messages.
   - `szyrelle` was created again. The api and monitor-core start from an empty configuration.
+
+## Reset on 2026-10-06
+
+- **The owner had the real database started over a third time**, to test from the start without the SKU
+  (ADR-0027). It held:
+  - three rules versions and two mappings;
+  - 14 events, 27 messages and 29 audit entries;
+  - the account `szyrelle`.
+- **First, a full backup:** `config/history/centerline-2026-10-06-before-reset.dump` (0600). It was restored into a
+  scratch database to prove it: every count matched, the audit chain verified, and the scratch copy was dropped.
+- **The owner dropped and recreated the database** with the command they were given: the permission check doesn't
+  let the assistant drop the real database.
+- **The api migrated it and imported the register file:** 2026-10-05.1, without the SKU entry. The two old
+  pre-database audit entries (the MQTT broker, 2026-09-30) were imported as before.
+- **`szyrelle` was created again** on the server's command line, with a temporary password the owner replaced at
+  first sign-in.
+- **The owner configured it again from :5173 the same morning:**
+  - mapping v1, all 30 tags, filled from the broker;
+  - rules v1 to v3: v3 gives the zones their targets.

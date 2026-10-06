@@ -106,9 +106,8 @@ def _aware(v: datetime | None) -> datetime | None:
 
 
 class RuleIn(_Camel):
-    """One scope: a SKU or every SKU (null), a zone or every zone (null). Empty fields are inherited."""
+    """One scope: a zone, or every zone of the parameter (null). Empty fields are inherited."""
 
-    sku: str | None = None
     parameter_id: str
     zone_id: str | None = None
     target: float | None = None
@@ -170,16 +169,24 @@ class CancelIn(_Camel):
     reason: str = ""
 
 
-class SkuIn(_Camel):
-    code: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$", description="As the machine publishes it")
-    name: str = Field(min_length=1, max_length=120)
+
+# -- Analytics-valid ranges (ANA-10/11, ADR-0029) ------------------------------------
+
+
+class RangesFileIn(_Camel):
+    """The CSV as uploaded, base64, so the bytes kept are the file's own (ANA-11)."""
+
+    source: str = Field("", max_length=200, description="The file's name, e.g. analytics-ranges.csv")
+    content_base64: str = Field(max_length=100_000)
+
+
+class RangesVersionIn(RangesFileIn):
+    expected_latest: int | None = Field(description="The newest version when the page loaded (optimistic lock)")
     reason: str = ""
+    activate: Literal["no", "now", "at"] = "no"
+    activate_at: datetime | None = None
 
-
-class SkuRenameIn(_Camel):
-    name: str = Field(min_length=1, max_length=120)
-    reason: str = ""
-
+    _tz = field_validator("activate_at")(_aware)
 
 
 # -- tag mappings (ADR-0013) ---------------------------------------------------------
@@ -193,18 +200,10 @@ class MappingRowIn(_Camel):
     field: str | None = Field(None, max_length=300)
 
 
-class SkuPlaceIn(_Camel):
-    topic: str = Field(max_length=65535)
-    field: str = Field(max_length=300)
-
-
 class MappingVersionIn(_Camel):
     expected_latest: int | None = Field(description="The newest version when the editor opened (optimistic lock)")
     based_on: int | None = None
     rows: list[MappingRowIn] = Field(max_length=2000)
-    sku: SkuPlaceIn | None = None
-    sku_placeholder: str | None = Field(None, max_length=40, description="A code standing in for the SKU field "
-                                        "while the machine publishes none: actual values only (ADR-0022)")
     source: str = Field("by hand", max_length=120)
     reason: str = ""
     activate: Literal["no", "now", "at"] = "no"

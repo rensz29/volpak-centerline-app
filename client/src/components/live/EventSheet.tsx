@@ -72,7 +72,7 @@ export function EventSheet({ id, onClose, onOpen }: { id: string; onClose: () =>
         <SheetHeader>
           <SheetTitle>{event ? `${eventTitle(event)} · ${event.zoneName}` : 'Event'}</SheetTitle>
           <SheetDescription>
-            {event ? `${event.parameterName} · SKU ${event.sku} · ${EVENT_STATE_LABEL[event.state] ?? event.state}${event.open ? '' : ' (closed)'}` : ' '}
+            {event ? `${event.parameterName} · ${EVENT_STATE_LABEL[event.state] ?? event.state}${event.open ? '' : ' (closed)'}` : ' '}
           </SheetDescription>
         </SheetHeader>
         <SheetBody className="flex flex-col gap-4 px-5 py-4 text-[13px]">

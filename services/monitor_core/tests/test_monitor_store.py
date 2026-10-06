@@ -11,7 +11,6 @@ import pytest
 from centerline_common.db import uuid7
 from centerline_monitor.engine import Engine
 from centerline_monitor.store import Store
-from conftest import SKU
 from monitor_helpers import Line, advance, at
 
 
@@ -31,7 +30,7 @@ def running(database, tmp_path, t: float = 0, store_cls=Recording) -> tuple[Engi
     engine = Engine(store.config(), store, at(t - 1))
     engine.restore(store.open_events(), at(t - 1))
     engine.set_connected(True, at(t - 1))
-    line = Line(sku=SKU)
+    line = Line()
     line.publish(engine, at(t))
     return engine, store, line
 

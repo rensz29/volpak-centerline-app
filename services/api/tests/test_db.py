@@ -26,7 +26,7 @@ def a_version(conn, number=1):
     vid = uuid7()
     conn.execute("""INSERT INTO config_version (id, number, register_version_id, settings, sha256, reason)
                     VALUES (%s, %s, %s, '{}', 'x', 'test')""", (vid, number, rid))
-    conn.execute("INSERT INTO sku_parameter_rule (config_version_id, parameter_id, warn_low) VALUES (%s, 'P02', 2)", (vid,))
+    conn.execute("INSERT INTO parameter_rule (config_version_id, parameter_id, warn_low) VALUES (%s, 'P02', 2)", (vid,))
     conn.commit()
     return vid
 
@@ -42,7 +42,7 @@ def refused(conn, sql, *args) -> bool:
 
 
 def test_migrations_apply_once_and_refuse_an_edited_file(conn, tmp_path):
-    assert migrate.status(conn) == {"applied": ["0001_configuration", "0002_mappings", "0003_monitoring", "0004_accounts", "0005_monitoring_control", "0006_app_role", "0007_sku_placeholder", "0008_notifications", "0009_workflow", "0010_truncate_guards"], "pending": []}
+    assert migrate.status(conn) == {"applied": ["0001_configuration", "0002_mappings", "0003_monitoring", "0004_accounts", "0005_monitoring_control", "0006_app_role", "0007_sku_placeholder", "0008_notifications", "0009_workflow", "0010_truncate_guards", "0011_no_sku", "0012_idempotency", "0013_analytics_ranges"], "pending": []}
     assert migrate.apply(conn) == []
     edited = tmp_path / "migrations"
     edited.mkdir()
@@ -67,10 +67,10 @@ def test_configuration_history_is_append_only(conn):
     vid = a_version(conn)
     for sql in ("UPDATE register_version SET reason = 'x'", "DELETE FROM register_version",
                 "UPDATE config_version SET reason = 'x'", "DELETE FROM config_version",
-                "UPDATE sku_parameter_rule SET warn_low = 9", "DELETE FROM sku_parameter_rule",
-                "TRUNCATE config_version CASCADE", "TRUNCATE sku_parameter_rule"):
+                "UPDATE parameter_rule SET warn_low = 9", "DELETE FROM parameter_rule",
+                "TRUNCATE config_version CASCADE", "TRUNCATE parameter_rule"):
         assert refused(conn, sql), sql
-    assert conn.execute("SELECT count(*) AS n FROM sku_parameter_rule WHERE config_version_id = %s", (vid,)).fetchone()["n"] == 1
+    assert conn.execute("SELECT count(*) AS n FROM parameter_rule WHERE config_version_id = %s", (vid,)).fetchone()["n"] == 1
 
 
 def test_the_audit_chain_notices_an_edit(conn):

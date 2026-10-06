@@ -86,7 +86,6 @@ export function OpenEventsPage() {
                 <th className="px-3 py-2 font-semibold">Opened</th>
                 <th className="px-3 py-2 font-semibold">Open for</th>
                 <th className="px-3 py-2 font-semibold">At opening</th>
-                <th className="px-3 py-2 font-semibold">SKU</th>
               </tr>
             </thead>
             <tbody>
@@ -114,7 +113,6 @@ export function OpenEventsPage() {
                         ? `HMI ${withUnit(e.hmi, e.unit)}, target ${withUnit(e.target, e.unit)}`
                         : `actual ${withUnit(e.actual, e.unit)}, HMI ${withUnit(e.hmi, e.unit)}`}
                     </td>
-                    <td className="text-ink-soft px-3 py-2">{e.sku}</td>
                   </tr>
                 )
               })}

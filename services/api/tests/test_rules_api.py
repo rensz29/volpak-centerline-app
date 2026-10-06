@@ -1,4 +1,4 @@
-"""Rules tab API (ADR-0012): versions, activation and rollback, SKUs and readiness, and the database's absence."""
+"""Rules tab API (ADR-0012, ADR-0027): versions, activation and rollback, what each zone lacks, and the database's absence."""
 
 from __future__ import annotations
 
@@ -8,11 +8,15 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from centerline_api.main import create_app
-from centerline_common.db import DatabaseConfig
+from centerline_common import rules as rules_mod
+from centerline_common.db import DatabaseConfig, uuid7
+from psycopg.types.json import Jsonb
 
 from .conftest import make_settings, new_client
 
-SKU = "67890123"
+
+DEFAULTS = {"mismatch_delay_s": 30, "warning_delay_s": 30, "critical_delay_s": 10, "recovery_delay_s": 15,
+            "brief_change_mode": "lightweight", "warning_notifications": True}
 
 
 def later(**delta) -> str:
@@ -96,44 +100,69 @@ def test_stale_and_invalid_versions_are_refused(make_client):
     stale = c.post("/api/v1/config/versions", json={"expectedLatest": None, "settings": prop["settings"], "rules": prop["rules"], "reason": "again"})
     assert stale.status_code == 409 and stale.json()["currentVersion"] == 1
 
-    bad_rules = [{"parameterId": "P02", "warnLow": 5, "critLow": 4}, {"parameterId": "P04", "zoneId": "NOPE", "warnLow": 1},
-                 {"parameterId": "P02", "sku": "NOT-A-SKU", "target": 180}]
+    bad_rules = [{"parameterId": "P02", "warnLow": 5, "critLow": 4}, {"parameterId": "P04", "zoneId": "NOPE", "warnLow": 1}]
     r = c.post("/api/v1/config/versions", json={"expectedLatest": 1, "settings": prop["settings"], "rules": bad_rules,
                                                "reason": "", "activate": "at"})
     assert r.status_code == 422
     fields = {e["field"] for e in r.json()["errors"]}
-    assert {"rules[0].critLow", "rules[1].zoneId", "rules[2].sku", "reason", "activateAt"} <= fields
+    assert {"rules[0].critLow", "rules[1].zoneId", "reason", "activateAt"} <= fields
+    with_sku = c.post("/api/v1/config/versions", json={"expectedLatest": 1, "settings": prop["settings"], "reason": "x y z",
+                                                      "rules": [{"parameterId": "P02", "sku": "12345", "target": 180}]})
+    assert with_sku.status_code == 422  # rules have no SKU (ADR-0027)
     negative = c.post("/api/v1/config/versions", json={"expectedLatest": 1, "settings": prop["settings"],
                                                       "rules": [{"parameterId": "P02", "warnLow": -1}], "reason": "x y z"})
     assert negative.status_code == 422 and negative.json()["errors"][0]["field"] == "rules[0].warnLow"
     assert c.get("/api/v1/config/rules").json()["latest"] == 1  # nothing saved
 
 
-def test_targets_for_every_zone_make_a_sku_ready(make_client):
+def test_each_zone_gets_its_target_and_the_gaps_say_what_is_still_missing(make_client):
     c = make_client()
-    assert c.post("/api/v1/config/skus", json={"code": SKU, "name": "Dressing 30 ml"}).status_code == 201
-    assert c.post("/api/v1/config/skus", json={"code": SKU, "name": "again"}).status_code == 409
     prop = c.get("/api/v1/config/rules/proposal").json()
     zones = monitored_zones(c)
-    p02 = [{"sku": SKU, "parameterId": p, "zoneId": z, "target": 180 + i} for i, (p, z) in enumerate(zones) if p == "P02"]
+    p02 = [{"parameterId": p, "zoneId": z, "target": 180 + i} for i, (p, z) in enumerate(zones) if p == "P02"]
     body = first_version(c, activate="now", rules=prop["rules"] + p02)
-    gaps = body["readiness"][SKU]
+    gaps = body["gaps"]  # the proposal gives every zone its limits: only targets are missing, outside Vertical
     assert len(gaps) == len(zones) - len(p02) and all(g["missing"] == ["target"] for g in gaps)
 
-    every = [{"sku": SKU, "parameterId": p, "zoneId": z, "target": 100 + i} for i, (p, z) in enumerate(zones)]
+    every = [{"parameterId": p, "zoneId": z, "target": 100 + i} for i, (p, z) in enumerate(zones)]
     check = c.post("/api/v1/config/versions/check", json={"expectedLatest": 1, "settings": prop["settings"],
                                                          "rules": prop["rules"] + every, "reason": ""}).json()
-    assert check["errors"] == [] and check["readiness"][SKU] == []
+    assert check["errors"] == [] and check["gaps"] == []
     assert c.get("/api/v1/config/rules").json()["latest"] == 1  # checking saves nothing
     r = c.post("/api/v1/config/versions", json={"expectedLatest": 1, "basedOn": 1, "settings": prop["settings"],
                                                "rules": prop["rules"] + every, "reason": "Targets from the centerline sheet",
                                                "activate": "now"})
-    assert r.status_code == 201 and r.json()["readiness"][SKU] == []
+    assert r.status_code == 201 and r.json()["gaps"] == []
+    assert c.get("/api/v1/config/versions/2").json()["carryOver"] is None
 
-    assert c.put(f"/api/v1/config/skus/{SKU}", json={"name": "Dressing 30 ml sachet"}).json()["skus"][0]["name"] == "Dressing 30 ml sachet"
-    assert c.delete(f"/api/v1/config/skus/{SKU}").status_code == 409  # saved versions use it
-    c.post("/api/v1/config/skus", json={"code": "TYPO-1", "name": "mistake"})
-    assert [s["code"] for s in c.delete("/api/v1/config/skus/TYPO-1", params={"reason": "typo"}).json()["skus"]] == [SKU]
+
+def test_a_version_saved_for_a_sku_before_adr_0027_offers_its_targets_as_the_zones(make_client, owner):
+    c = make_client()
+    prop = c.get("/api/v1/config/rules/proposal").json()
+    zones = monitored_zones(c)
+    with owner.connect() as conn:  # as the version was written before migration 0011 refused SKUs
+        conn.execute("ALTER TABLE parameter_rule DROP CONSTRAINT parameter_rule_no_sku")
+        settings = {"pause_when_stopped": {"enabled": True, "long_stop_min": 10, "warmup_min": 30}, "defaults": DEFAULTS}
+        rows = [{"sku": None, "parameter_id": r["parameterId"], "zone_id": None, "warn_low": r["warnLow"], "warn_high": r["warnHigh"],
+                 "crit_low": r["critLow"], "crit_high": r["critHigh"]} for r in prop["rules"]]
+        rows += [{"sku": "12345", "parameter_id": p, "zone_id": z, "target": 200 + i} for i, (p, z) in enumerate(zones)]
+        full = [{**{f: None for f in rules_mod.FIELDS}, **r} for r in rows]
+        reg = conn.execute("SELECT id FROM register_version ORDER BY seq DESC LIMIT 1").fetchone()["id"]
+        vid = uuid7()
+        conn.execute("""INSERT INTO config_version (id, number, register_version_id, settings, sha256, reason)
+                        VALUES (%s, 1, %s, %s, %s, 'test')""", (vid, reg, Jsonb(settings), rules_mod.digest(settings, full)))
+        for r in full:
+            conn.execute(f"""INSERT INTO parameter_rule (config_version_id, legacy_sku_code, parameter_id, zone_id, {', '.join(rules_mod.FIELDS)})
+                             VALUES (%s, %s, %s, %s{', %s' * len(rules_mod.FIELDS)})""",
+                         (vid, r["sku"], r["parameter_id"], r["zone_id"], *(r[f] for f in rules_mod.FIELDS)))
+        conn.commit()
+    v1 = c.get("/api/v1/config/versions/1").json()
+    assert v1["intact"]  # its fingerprint still counts the SKU rows
+    assert all("sku" not in r for r in v1["rules"]) and all(r["zoneId"] is None for r in v1["rules"])  # judged: limits only
+    assert len(v1["gaps"]) == len(zones) and all(g["missing"] == ["target"] for g in v1["gaps"])
+    assert v1["carryOver"]["from"] == "12345"
+    carried = {(r["parameterId"], r["zoneId"]): r["target"] for r in v1["carryOver"]["rules"] if r["zoneId"]}
+    assert carried == {(p, z): 200 + i for i, (p, z) in enumerate(zones)}
 
 
 def test_a_tampered_version_reads_as_not_intact(make_client, owner):
@@ -141,7 +170,7 @@ def test_a_tampered_version_reads_as_not_intact(make_client, owner):
     first_version(c)
     with owner.connect() as conn:  # only a superuser can switch the triggers off; the services' role can't (ADR-0020)
         conn.execute("SET session_replication_role = replica")
-        conn.execute("UPDATE sku_parameter_rule SET warn_low = 9 WHERE parameter_id = 'P02'")
+        conn.execute("UPDATE parameter_rule SET warn_low = 9 WHERE parameter_id = 'P02'")
         conn.commit()
     assert c.get("/api/v1/config/versions/1").json()["intact"] is False
 
@@ -184,7 +213,7 @@ def test_health_shows_whether_monitor_core_is_alive_and_judging(make_client, dat
     assert c.get("/api/v1/health").json()["monitor"] is None  # never ran
     with database.connect() as conn:
         conn.execute("""INSERT INTO monitor_heartbeat (instance, started_at, beat_at, status)
-                        VALUES ('pc', now(), now(), '{"judging": false, "reasons": ["No SKU field is mapped yet (O-15)"]}')""")
+                        VALUES ('pc', now(), now(), '{"judging": false, "reasons": ["No tag mapping is in effect (Configuration → Mappings)"]}')""")
         conn.commit()
     monitor = c.get("/api/v1/health").json()["monitor"]
-    assert monitor["alive"] and monitor["judging"] is False and "O-15" in monitor["reasons"][0]
+    assert monitor["alive"] and monitor["judging"] is False and "No tag mapping" in monitor["reasons"][0]

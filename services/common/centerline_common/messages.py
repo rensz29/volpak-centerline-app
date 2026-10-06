@@ -35,25 +35,21 @@ def _v(value, unit: str | None) -> str:
 def render(n: dict, type_: str, *, event: dict | None = None, line: str = "Volpak", app_url: str | None = None) -> dict:
     """One notification as {subject, severity, text, facts, link, footer}.
 
-    n: {id, dedup_key, kind, created_at, payload}. event, when it has one: {id, kind, opened_at, sku_code, rule}.
+    n: {id, dedup_key, kind, created_at, payload}. event, when it has one: {id, kind, opened_at, rule}.
     """
     p, kind = n.get("payload") or {}, n["kind"]
     unit = p.get("unit")
     where = f"{p.get('parameterName')} · {p.get('zoneName')}" if p.get("parameter") else None
-    placeholder = bool(event and (event.get("rule") or {}).get("sku_placeholder"))
-    sku = p.get("sku") or (event or {}).get("sku_code")
     facts: list[tuple[str, str]] = [("Line", line)]
     if where:
         facts.append(("Zone", f"{where} ({p['parameter']}.{p['zone']})"))
-    if sku:
-        facts.append(("SKU", f"{sku} (placeholder: the machine doesn't publish its SKU yet)" if placeholder else sku))
     hmi, target, actual = _v(p.get("hmi"), unit), _v(p.get("target"), unit), _v(p.get("actual"), unit)
     link_page = "active"
     ack = " A Manager acknowledges it in Centerline to stop the reminders."
 
     if type_ == "hmi_mismatch":
         severity, subject = "MISMATCH", f"HMI mismatch · {where} · {line}"
-        text = f"The HMI setpoint {hmi} differs from the target {target} for SKU {sku}."
+        text = f"The HMI setpoint {hmi} differs from the target {target}."
         if p.get("supersedes"):
             text += " It replaces the earlier mismatch on this zone."
         facts += [("HMI setpoint", hmi), ("Target", target)]
@@ -84,10 +80,6 @@ def render(n: dict, type_: str, *, event: dict | None = None, line: str = "Volpa
             subject = f"Back to normal · {where} · {line}"
             text = f"The actual value {actual} is back inside its band around the HMI setpoint {hmi}."
             facts += [("Actual", actual), ("HMI setpoint", hmi)]
-    elif type_ == "changeover":
-        severity, subject = "INFO", f"SKU changeover · {p.get('from')} → {p.get('to')} · {line}"
-        text = (f"The line changed from SKU {p.get('from')} to {p.get('to')}. Its open events closed as SKU changeover, "
-                "and judging resumes on a fresh snapshot.")
     elif type_ == "reason_overdue":  # WF-03: the shift's request is still open 15 min after it was made
         severity, subject = "WARNING", f"Reason request overdue · {where} · {line}"
         text = (f"The reason request for the HMI mismatch on {where} is still open 15 minutes after it was made: "
@@ -124,9 +116,9 @@ def render(n: dict, type_: str, *, event: dict | None = None, line: str = "Volpa
 
 def _system(p: dict, line: str) -> tuple[str, str, str]:
     kind = p.get("kind", "")
-    if kind == "SKU unavailable (OPC-08)":
-        return ("INFO", f"Monitoring paused: no usable SKU · {line}",
-                "Centerline isn't judging the line: " + "; ".join(p.get("reasons") or []) + ".")
+    if kind == "Rules incomplete (OPC-08)":
+        return ("INFO", f"Monitoring paused: the rules are incomplete · {line}",
+                "Centerline isn't judging the line: " + "; ".join(p.get("reasons") or []) + ". A Manager completes them in Centerline.")
     if kind == "Maintenance overdue (MNT-01)":
         return ("WARNING", f"Maintenance window overdue · {line}",
                 f"The maintenance window “{p.get('reason')}” was planned to end {manila(p.get('plannedEnd'))} and is still "

@@ -5,6 +5,9 @@
 # monitor-core's disk journal (RES-01): steps not yet written to the database
 data/
 
+# The Docker stack's settings and secrets on this host (deploy/setup.sh)
+deploy/config/
+
 # Python
 __pycache__/
 *.py[cod]

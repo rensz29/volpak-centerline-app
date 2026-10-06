@@ -1,6 +1,7 @@
 # ADR-0025: Shifts, the handover and the reason workflow (Phase 2, second slice)
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended by [ADR-0028](ADR-0028-polling-idempotency-g2-acceptance.md) (2026-10-06): polling stays instead of the WebSocket, and a closed
+  request's status is the purge
 - **Date:** 2026-10-01
 - **Decider:** Szyrelle (system owner), on 2026-10-01:
   - an unfinished request at the shift's end closes, and the next shift gets a new one;

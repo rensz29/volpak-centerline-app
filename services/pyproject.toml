@@ -18,5 +18,6 @@ dev = ["pytest>=8", "httpx2"]
 
 [tool.pytest.ini_options]
 pythonpath = ["common", "api", "monitor_core", "notifier"]
-testpaths = ["api/tests", "monitor_core/tests", "notifier/tests"]
+testpaths = ["api/tests", "monitor_core/tests", "notifier/tests", "../tests/acceptance"]
+markers = ["urs(*ids): the URS v1.1 requirements an acceptance test shows (tests/acceptance)"]
 addopts = "-q"

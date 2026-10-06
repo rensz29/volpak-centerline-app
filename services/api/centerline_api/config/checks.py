@@ -18,7 +18,6 @@ import paho.mqtt.client as mqtt
 from centerline_common.historian import TimebaseClient, TimebaseError
 from centerline_common.register import Register
 
-SKU_HINTS = ("sku", "recipe", "product", "material", "order", "batch")
 
 
 def check_historian(cfg: dict, namespace: str) -> dict:
@@ -48,8 +47,6 @@ def _register_tags(reg: Register) -> list[tuple[str, str]]:
     tags += [(f"{v.zone_name} actual", v.tag) for v in reg.analytics if v.kind == "actual"
              and v.tag not in {z.actual for z in reg.zones}]
     tags += [(f"context: {k}", t) for k, t in reg.context.items()]
-    if reg.sku_tag:
-        tags.append(("SKU", reg.sku_tag))
     first: dict[str, str] = {}
     for label, tag in tags:  # one row per tag, under its first (most specific) label
         first.setdefault(tag, label)
@@ -153,17 +150,12 @@ def check_mqtt(cfg: dict, reg: Register, seconds: float) -> dict:
                       "retained": bool(s["retained"]), "format": s["format"], "fields": len(s["fields"]),
                       "fieldNames": sorted(s["fields"])[:500], "sample": s["sample"]} for t, s in stats.items()),
                     key=lambda r: -r["messages"])
-    sku = [{"topic": t, "field": k, "value": str(v)[:60]} for t, s in stats.items() for k, v in s["fields"].items()
-           if any(h in k.lower() for h in SKU_HINTS) and not isinstance(v, bool)
-           and str(v).strip().lower() not in ("true", "false")]  # not flags such as Product_Inlet_Valve
     warnings = []
     if not tls.get("enabled"):
         warnings.append("TLS is off: the password and all values cross the network in clear (ADR-0006, control M1).")
     if not stats:
         warnings.append(f"Connected, but nothing arrived in {seconds:g} s on {', '.join(subs)}. Check the topic filter "
                         "and that the account may subscribe to it.")
-    if stats and not sku:
-        warnings.append("No SKU-like field was seen: the edge team still has to add it (O-15).")
     return {"connected": True, "connect": state["connect"], "subscriptions": state["subscribe"],
             "listenedS": round(elapsed, 1), "topics": topics[:50], "topicCount": len(topics),
-            "mapped": mapped, "missing": missing, "skuCandidates": sku[:10], "warnings": warnings}
+            "mapped": mapped, "missing": missing, "warnings": warnings}

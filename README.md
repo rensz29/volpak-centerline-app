@@ -18,10 +18,13 @@ something, it is authoritative. Phase 0 progress is tracked in [docs/phase-0.md]
 | [services/notifier/](services/notifier/README.md) | The notifier: delivers the outbox to Teams and email |
 | `services/common/` | Code the services share, with no web framework in it |
 | `db/` | Plain SQL migrations, applied in order by the api, and the seed proposals |
+| [deploy/](deploy/README.md) | The application in Docker: `compose.yaml`, the images, the proxy's Caddyfile, `setup.sh` (ADR-0030) |
 | [deploy/dev/](deploy/dev/README.md) | The development database: PostgreSQL 17 with pgvector, in Docker |
 | [deploy/host-check/](deploy/host-check/README.md) | Checks for the control-room PC (G0b) |
 | `config/` | The parameter register. Connection settings, secrets and backups stay here too, git-ignored |
 | `tools/` | Phase 0 probes and analyses, the MQTT simulator and a local stand-in for Teams and SMTP |
+| [tests/acceptance/](tests/acceptance/README.md) | The URS acceptance suites the phase gates run: AT-04…06 for G2, AT-ANA-01…10 for G4 |
+| [tests/fixtures/analytics/](tests/fixtures/analytics/README.md) | The Analytics reference dataset and its independently calculated results |
 
 ## Run it on a development PC
 
@@ -29,13 +32,21 @@ something, it is authoritative. Phase 0 progress is tracked in [docs/phase-0.md]
 2. Start the api, and create the first Administrator: [services/api/README.md](services/api/README.md#run).
 3. Start the web app: `cd client && npm install && npm run dev`, then open <http://localhost:5173>.
 4. To judge a line, run monitor-core and the notifier: [services/monitor_core/README.md](services/monitor_core/README.md)
-   and [services/notifier/README.md](services/notifier/README.md). For development, point monitor-core at a local
-   Mosquitto fed by [tools/mqtt-sim](tools/mqtt-sim/README.md) and a scratch database, never the plant broker.
+   and [services/notifier/README.md](services/notifier/README.md). With their default settings they judge the real
+   machine on the plant broker and write to the real database, where everything is permanent
+   ([ADR-0026](docs/decisions/ADR-0026-real-app-on-the-real-machine.md)). To develop or test, point them at a local
+   Mosquitto fed by [tools/mqtt-sim](tools/mqtt-sim/README.md) and a scratch database instead.
+
+## Run it in Docker
+
+The same services as containers, judging the real plant on a database of their own, as on the control-room PC:
+[deploy/README.md](deploy/README.md) ([ADR-0030](docs/decisions/ADR-0030-docker-stack.md)). One monitor-core judges
+the line at a time: stop the development ones first.
 
 ## Tests
 
 ```bash
-cd services && .venv/bin/python -m pytest   # api, monitor-core and notifier; the database tests need deploy/dev running
+cd services && .venv/bin/python -m pytest   # api, monitor-core, notifier and the acceptance suites; the database tests need deploy/dev running
 cd client && npm run lint && npm run build
 ```
 

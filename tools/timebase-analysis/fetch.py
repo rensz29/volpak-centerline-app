@@ -4,7 +4,7 @@
 
 Dates are Asia/Manila calendar days (start inclusive, end exclusive); queries
 run in UTC. Tags come from config/parameter-register.json: each active zone's
-setpoint and actual, the SKU tag once it exists, and the context tags.
+setpoint and actual, and the context tags.
 
 Output in data/raw/: one CSV per tag (t ISO UTC, v, q), gaps.csv listing spans
 the server couldn't return, and manifest.json, which lets an interrupted

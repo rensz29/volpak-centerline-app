@@ -54,7 +54,7 @@ def close_ended_shifts(conn, now: datetime) -> int:
 
 def overdue(conn, now: datetime) -> list[dict]:
     """Requests open for 15 min that haven't alerted Management yet, with what the message needs."""
-    return conn.execute("""SELECT r.id, r.event_id, r.created_at, r.status, e.parameter_id, e.zone_id, e.sku_code, e.raw_hmi,
+    return conn.execute("""SELECT r.id, r.event_id, r.created_at, r.status, e.parameter_id, e.zone_id, e.raw_hmi,
                                   e.raw_target, e.opened_at, s.code AS shift, s.starts_at, s.ends_at, s.production_date
                              FROM workflow_request r JOIN event e ON e.id = r.event_id
                              JOIN shift_instance s ON s.id = r.shift_instance_id

@@ -25,6 +25,11 @@ def test_value_holds_until_next_sample_and_carry_in_counts():
     assert ex.samples == 2
 
 
+def test_a_carry_in_superseded_right_at_the_start_isnt_counted():
+    series, ex = build_series([s(-100, None), s(0, 20.0)], LO, LO + 60)  # a null in force until exactly LO
+    assert (ex.samples, ex.null) == (1, 0) and series.vals.tolist() == [20.0]  # never in force: not counted (AT-ANA-03)
+
+
 def test_min_max_use_values_in_force():
     series, _ = build_series([s(-100, 10.0), s(30, 20.0), s(70, 5.0), s(80, 20.0)], LO, LO + 120)
     assert aggregate(series, LO, LO + 120, 60, "MIN").value.tolist() == [10.0, 5.0]

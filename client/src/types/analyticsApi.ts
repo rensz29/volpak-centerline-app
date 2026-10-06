@@ -50,8 +50,8 @@ export interface AnalyticsOptions {
     rangeHours: number
   }
   limits: { maxRangeDays: number; pairLimit: number; visibleGroups: number }
-  sku: { available: boolean; reason: string | null }
-  ranges: { loaded: boolean; source: string | null; sha256: string | null; problems: string[] }
+  /** The Analytics-valid ranges in effect (ADR-0029): version null when none is */
+  ranges: { loaded: boolean; version: number | null; source: string | null; sha256: string | null; problems: string[] }
   timezone: string
   note: string
   registerVersion: string
@@ -116,10 +116,12 @@ export interface GroupResult {
 }
 
 export interface AnalyticsResult {
-  query: AnalyticsQueryRequest & { bucketSeconds: number; sku: string | null }
+  query: AnalyticsQueryRequest & { bucketSeconds: number }
   x: AnalyticsVariable
   y: AnalyticsVariable
   exclusions: { x: Exclusions; y: Exclusions }
+  /** The ranges version applied, and each variable's [min, max] (null: none applied) */
+  ranges: { version: number | null; x: [number, number] | null; y: [number, number] | null }
   buckets: {
     total: number
     xValid: number

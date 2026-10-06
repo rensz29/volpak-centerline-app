@@ -5,7 +5,7 @@ HMI mismatch (HMI-01…05): At target → Pending (the mismatch delay runs) → 
 Resolved, with a recovery notice. A new off-target integer always restarts the delay;
 while an event is open, it closes that event as Superseded and the next event links back
 to it (HMI-03). Back at target before the delay ends is a brief change, recorded per the
-SKU's mode and never notified (HMI-04, HMI-05).
+rules' mode and never notified (HMI-04, HMI-05).
 
 Actual severity (ACT-01…04): Normal, Warning and Critical; every change waits for its own
 delay (Warning, Critical, the Warning delay again for Critical → Warning, and Recovery
@@ -23,6 +23,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from centerline_common.db import uuid7
+from centerline_common.isotime import iso
 from centerline_common.register import HmiMatch
 
 from .effects import BriefChange, CancelTimer, Notify, OpenEvent, StartTimer, Transition, Versions, ZoneRef
@@ -39,10 +40,9 @@ def text(v) -> str | None:
 
 @dataclass(frozen=True)
 class ZoneRule:
-    """One zone's rule under one SKU, resolved from the rules version in effect."""
+    """One zone's rule, resolved from the rules version in effect."""
 
-    sku: str
-    target: Decimal | None  # None for a placeholder SKU's zone without a target: HMI mismatch isn't judged (ADR-0022)
+    target: Decimal | None  # None when the rules give the zone no target: its HMI setpoint isn't judged (ADR-0027)
     limits: Limits
     mismatch_delay_s: int
     warning_delay_s: int
@@ -53,23 +53,21 @@ class ZoneRule:
     match: HmiMatch
     versions: Versions
     rules_number: int | None = None
-    sku_placeholder: bool = False
 
     def pinned(self) -> dict:
         """Stored with an event, so it can be judged by the same rule after a restart."""
-        return {"sku": self.sku, "target": text(self.target), "rules_version": self.rules_number,
+        return {"target": text(self.target), "rules_version": self.rules_number,
                 "limits": {k: text(getattr(self.limits, k)) for k in ("warn_low", "warn_high", "crit_low", "crit_high")},
                 "delays_s": {"mismatch": self.mismatch_delay_s, "warning": self.warning_delay_s,
                              "critical": self.critical_delay_s, "recovery": self.recovery_delay_s},
                 "brief_change_mode": self.brief_change_mode, "warning_notifications": self.warning_notifications,
-                "hmi_match": {"method": self.match.method, "decimals": self.match.decimals},
-                **({"sku_placeholder": True} if self.sku_placeholder else {})}
+                "hmi_match": {"method": self.match.method, "decimals": self.match.decimals}}
 
     @classmethod
     def from_pinned(cls, d: dict, versions: Versions) -> ZoneRule:
         lim, dl = d["limits"], d["delays_s"]
-        return cls(sku=d["sku"], target=None if d.get("target") is None else Decimal(d["target"]),
-                   rules_number=d.get("rules_version"), sku_placeholder=bool(d.get("sku_placeholder")),
+        # Events pinned before ADR-0027 also carry their SKU: it's evidence, and judges nothing now
+        return cls(target=None if d.get("target") is None else Decimal(d["target"]), rules_number=d.get("rules_version"),
                    limits=Limits(*(Decimal(lim[k]) for k in ("warn_low", "warn_high", "crit_low", "crit_high"))),
                    mismatch_delay_s=dl["mismatch"], warning_delay_s=dl["warning"], critical_delay_s=dl["critical"],
                    recovery_delay_s=dl["recovery"], brief_change_mode=d["brief_change_mode"],
@@ -79,7 +77,7 @@ class ZoneRule:
 
 def _payload(zone: ZoneRef, rule: ZoneRule, **values) -> dict:
     return {"parameter": zone.parameter_id, "parameterName": zone.parameter_name, "zone": zone.zone_id,
-            "zoneName": zone.zone_name, "unit": zone.unit, "sku": rule.sku,
+            "zoneName": zone.zone_name, "unit": zone.unit,
             **{k: text(v) if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool) else v
                for k, v in values.items()}}
 
@@ -99,7 +97,7 @@ class HmiMachine:
 
     def _pend(self, now: datetime, key: int, rule: ZoneRule) -> list:
         self.state, self.key, self.since = "PENDING", key, now
-        self.trace = [(now.isoformat(), text(self.last))]
+        self.trace = [(iso(now), text(self.last))]
         return [StartTimer(self.timer, "hmi_delay", now + timedelta(seconds=rule.mismatch_delay_s))]
 
     def evaluate(self, now: datetime, hmi, rule: ZoneRule) -> list:
@@ -112,11 +110,11 @@ class HmiMachine:
                 fx += self._pend(now, key, r)
         elif self.state == "PENDING":
             if len(self.trace) < TRACE_LIMIT:
-                self.trace.append((now.isoformat(), text(self.last)))
+                self.trace.append((iso(now), text(self.last)))
             if at_target:
                 fx.append(CancelTimer(self.timer))
                 if r.brief_change_mode != "do_not_record":
-                    fx.append(BriefChange(uuid7(), self.zone, r.sku, r.brief_change_mode, self.since, now, r.versions,
+                    fx.append(BriefChange(uuid7(), self.zone, r.brief_change_mode, self.since, now, r.versions,
                                           r.target, self.trace[0][1] and Decimal(self.trace[0][1]),
                                           {"values": self.trace} if r.brief_change_mode == "cleared_before_trigger" else None))
                 self._reset()
@@ -139,8 +137,8 @@ class HmiMachine:
         if self.state != "PENDING":
             return []
         eid = uuid7()
-        inputs = {"hmi": text(self.last), "target": text(rule.target), "pending_since": self.since.isoformat()}
-        fx = [OpenEvent(eid, "HMI_MISMATCH", self.zone, rule.sku, now, rule.versions, rule.pinned(),
+        inputs = {"hmi": text(self.last), "target": text(rule.target), "pending_since": iso(self.since)}
+        fx = [OpenEvent(eid, "HMI_MISMATCH", self.zone, now, rule.versions, rule.pinned(),
                         raw_target=rule.target, raw_hmi=self.last, supersedes=self.superseded),
               Transition(eid, "OPEN", now, inputs),
               Notify(f"{eid}:initial", "initial", now,
@@ -157,8 +155,7 @@ class HmiMachine:
         return []
 
     def close(self, now: datetime, state: str) -> list:
-        """End whatever is going on without a recovery notice: a different configured SKU
-        (CLOSED_SKU_CHANGEOVER, ADR-0001) or monitoring switched off (CLOSED_MONITORING_DISABLED, MON-01)."""
+        """End whatever is going on without a recovery notice: monitoring switched off (CLOSED_MONITORING_DISABLED, MON-01)."""
         fx = []
         if self.state == "OPEN":
             fx.append(Transition(self.event_id, state, now, {"hmi": text(self.last)}, open=False))
@@ -167,9 +164,6 @@ class HmiMachine:
         self._reset()
         self.superseded = None
         return fx
-
-    def changeover(self, now: datetime) -> list:
-        return self.close(now, "CLOSED_SKU_CHANGEOVER")
 
     def restore(self, event_id, rule: ZoneRule, hmi) -> None:
         """After a restart: the open event continues, judged by its pinned rule."""
@@ -236,7 +230,7 @@ class ActualMachine:
         if old == Severity.NORMAL:
             eid, r = uuid7(), rule
             actual, hmi = self.last
-            fx += [OpenEvent(eid, "ACTUAL", self.zone, r.sku, now, r.versions, r.pinned(), raw_target=r.target,
+            fx += [OpenEvent(eid, "ACTUAL", self.zone, now, r.versions, r.pinned(), raw_target=r.target,
                              raw_hmi=hmi, raw_actual=actual, severity=new.name),
                    Transition(eid, new.name, now, self._inputs(new), severity=new.name)]
             self.event_id, self.rule, self.state = eid, r, new
@@ -335,9 +329,6 @@ class ActualMachine:
             fx.append(Transition(self.event_id, state, now, self._inputs(), open=False))
         self._reset()
         return fx
-
-    def changeover(self, now: datetime) -> list:
-        return self.close(now, "CLOSED_SKU_CHANGEOVER")
 
     def restore(self, event_id, rule: ZoneRule, severity: str, acknowledged: bool, now: datetime,
                 critical_periods: int = 0, repeats: int = 0, escalated: bool = False) -> None:

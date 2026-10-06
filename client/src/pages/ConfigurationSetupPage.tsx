@@ -1,4 +1,4 @@
-import { Cable, ClipboardList, CloudOff, Eye, Scale, Send, Tags, TriangleAlert, Waypoints } from 'lucide-react'
+import { Cable, ClipboardList, CloudOff, Eye, Ruler, Scale, Send, Tags, TriangleAlert, Waypoints } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -9,6 +9,7 @@ import { MqttConnectionCard } from '@/components/setup/MqttConnectionCard'
 import { NotificationsConnectionCard } from '@/components/setup/NotificationsConnectionCard'
 import { ParameterEditor } from '@/components/setup/ParameterEditor'
 import { MappingsTab } from '@/components/setup/mappings/MappingsTab'
+import { RangesTab } from '@/components/setup/ranges/RangesTab'
 import { RoutingTab } from '@/components/setup/routing/RoutingTab'
 import { RulesTab } from '@/components/setup/rules/RulesTab'
 import { RecentChanges, TagRegister } from '@/components/setup/TagRegister'
@@ -19,8 +20,8 @@ import { useRoles } from '@/hooks/useAuth'
 import { configApi } from '@/services/configApi'
 import type { Connections, LatestValue, RegisterParameter, RegisterView } from '@/types/configApi'
 
-type Tab = 'connections' | 'tags' | 'mappings' | 'rules' | 'notifications' | 'workflow'
-const TABS: Tab[] = ['connections', 'tags', 'mappings', 'rules', 'notifications', 'workflow']
+type Tab = 'connections' | 'tags' | 'mappings' | 'rules' | 'notifications' | 'workflow' | 'ranges'
+const TABS: Tab[] = ['connections', 'tags', 'mappings', 'rules', 'notifications', 'workflow', 'ranges']
 
 const message = (caught: unknown) => (caught instanceof Error ? caught.message : String(caught))
 
@@ -34,8 +35,8 @@ function ReadOnly({ what, role }: { what: string; role: string }) {
 }
 
 /**
- * Configuration (ADR-0011, ADR-0012, ADR-0023): the data-source and notification connections,
- * the tag register, the monitoring rules and who gets notified. Secrets go to the api and are never shown again; every
+ * Configuration (ADR-0011, ADR-0012, ADR-0023, ADR-0029): the data-source and notification connections,
+ * the tag register, the monitoring rules, who gets notified and the Analytics-valid ranges. Secrets go to the api and are never shown again; every
  * register and rules change is checked, versioned and audited in the database.
  * Managers and Administrators see every tab; the Rules tab is the Manager's to change,
  * the others the Administrator's (ADR-0016).
@@ -85,7 +86,7 @@ export function ConfigurationSetupPage() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="Configuration"
-        description="Where Centerline gets its data, which tags belong to each parameter and zone, where they arrive on MQTT, the rules it judges them by, and who gets notified."
+        description="Where Centerline gets its data, which tags belong to each parameter and zone, where they arrive on MQTT, the rules it judges them by, who gets notified, and which values count in Analytics."
         breadcrumbs={[{ label: 'Setup' }, { label: 'Configuration' }]}
       />
 
@@ -108,6 +109,9 @@ export function ConfigurationSetupPage() {
           </TabsTrigger>
           <TabsTrigger value="workflow">
             <ClipboardList className="size-4" aria-hidden /> Reasons
+          </TabsTrigger>
+          <TabsTrigger value="ranges">
+            <Ruler className="size-4" aria-hidden /> Analytics ranges
           </TabsTrigger>
         </TabsList>
 
@@ -171,6 +175,11 @@ export function ConfigurationSetupPage() {
         <TabsContent value="workflow" className="mt-4">
           {!isAdministrator && <ReadOnly what="the follow-up questions" role="Administrator" />}
           <WorkflowQuestionsCard canEdit={isAdministrator} />
+        </TabsContent>
+
+        <TabsContent value="ranges" className="mt-4">
+          {!isAdministrator && <ReadOnly what="the Analytics ranges" role="Administrator" />}
+          <RangesTab canEdit={isAdministrator} />
         </TabsContent>
       </Tabs>
 

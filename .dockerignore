@@ -1,0 +1,23 @@
+# What never goes into an image (deploy/*.Dockerfile): secrets, this PC's settings and history, runtime data,
+# dependencies and build output rebuilt inside, and folders the images don't use.
+**/secrets
+config/
+deploy/config/
+deploy/demo/
+data/
+logs/
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/*.pyc
+client/dist
+services/*/config.json
+services/*/tests
+*.dump
+.git
+.env
+.env.*
+docs/
+tests/
+tools/

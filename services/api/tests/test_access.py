@@ -60,9 +60,6 @@ EXPECTED = {
     ("POST", "/api/v1/config/versions"): MGR,
     ("POST", "/api/v1/config/versions/{number}/activate"): MGR,
     ("POST", "/api/v1/config/activations/{activation_id}/cancel"): MGR,
-    ("POST", "/api/v1/config/skus"): MGR,
-    ("PUT", "/api/v1/config/skus/{code}"): MGR,
-    ("DELETE", "/api/v1/config/skus/{code}"): MGR,
     # the Mappings tab, mapping import included, is the Administrator's (O-13)
     ("GET", "/api/v1/config/mappings"): PRIV,
     ("GET", "/api/v1/config/mappings/versions/{number}"): PRIV,
@@ -84,6 +81,15 @@ EXPECTED = {
     ("POST", "/api/v1/config/routing/versions"): ADM,
     ("POST", "/api/v1/config/routing/versions/{number}/activate"): ADM,
     ("POST", "/api/v1/config/routing/activations/{activation_id}/cancel"): ADM,
+    # Analytics-valid ranges (ANA-11, ADR-0029): both read them; an Administrator uploads and activates them
+    ("GET", "/api/v1/config/analytics-ranges"): PRIV,
+    ("GET", "/api/v1/config/analytics-ranges/template.csv"): PRIV,
+    ("GET", "/api/v1/config/analytics-ranges/versions/{number}"): PRIV,
+    ("GET", "/api/v1/config/analytics-ranges/versions/{number}/original.csv"): PRIV,
+    ("POST", "/api/v1/config/analytics-ranges/versions/check"): ADM,
+    ("POST", "/api/v1/config/analytics-ranges/versions"): ADM,
+    ("POST", "/api/v1/config/analytics-ranges/versions/{number}/activate"): ADM,
+    ("POST", "/api/v1/config/analytics-ranges/activations/{activation_id}/cancel"): ADM,
     ("GET", "/api/v1/notifications"): PRIV,
     ("GET", "/api/v1/notifications/{notification_id}"): PRIV,
     ("POST", "/api/v1/notifications/test"): ADM,
@@ -174,11 +180,13 @@ def test_each_role_reaches_its_own_pages_only(make_client):
     assert manager.get("/api/v1/config/connections").status_code == 200  # reads every tab
     r = manager.put("/api/v1/config/connections/mqtt", json={"host": "broker", "subscriptions": ["#"]})
     assert r.status_code == 403 and "Administrator" in r.json()["detail"]
-    assert manager.post("/api/v1/config/skus", json={"code": "A1", "name": "Test"}).status_code == 201
+    proposal = manager.get("/api/v1/config/rules/proposal").json()
+    draft = {"expectedLatest": None, "settings": proposal["settings"], "rules": proposal["rules"], "reason": ""}
+    assert manager.post("/api/v1/config/versions/check", json=draft).status_code == 200
     assert manager.get("/api/v1/users").status_code == 403
 
     assert admin.get("/api/v1/config/rules").status_code == 200
-    r = admin.post("/api/v1/config/skus", json={"code": "A2", "name": "Test"})
+    r = admin.post("/api/v1/config/versions/check", json=draft)
     assert r.status_code == 403 and "Manager" in r.json()["detail"]
     assert admin.get("/api/v1/users").status_code == 200
     assert admin.get("/api/v1/health").status_code == 200

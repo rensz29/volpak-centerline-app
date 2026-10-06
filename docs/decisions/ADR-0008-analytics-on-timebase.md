@@ -1,6 +1,7 @@
 # ADR-0008: Analytics & Correlation on Timebase, built first
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended by [ADR-0027](ADR-0027-no-sku.md) (2026-10-05): no SKU filter. Amended by
+  [ADR-0029](ADR-0029-analytics-ranges-and-g4-acceptance.md) (2026-10-06): the Analytics-valid ranges are versions in the database, not a file in the api config
 - **Date:** 2026-09-29
 - **Decider:** Szyrelle (system owner)
 - **URS:** ANA-01…21, SEC-01; affects O-06, O-10, O-15, O-18, O-19

@@ -19,7 +19,6 @@ python mqtt_sim.py                                  # steady values, 1 message/s
 | A mismatch nobody puts back for 10 min: the operator's reason request stays open (ADR-0025) | `--mismatch-every 300 --mismatch-for 600` |
 | Edge clock offset like the plant (about −114 s) | `--skew-s -114` |
 | One area stops publishing (stale data, pause gate) | `--stop-area SPC --stop-after 60` |
-| SKU field present (ADR-0001 changeover tests) | `--sku-field SPC.SKU_Code --sku 67890123` |
 | Retained messages (snapshot on resume) | `--retain` |
 | A zone's actual leaving its band: Warning 60 s, and on every other drift Critical 60 s more (bands from the Rules proposal) | `--drift-every 150` |
 | The machine stopping (Machine_Run 0): Actual rules pause (ADR-0010) | `--machine-stop-every 900 --machine-stop-for 120` |

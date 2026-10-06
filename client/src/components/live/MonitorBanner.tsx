@@ -26,7 +26,7 @@ function Banner({ tone, icon: Icon, title, children }: { tone: Tone; icon: typeo
 export function MonitorBanner({ monitor, error, targets }: {
   monitor: MonitorStatus | null | undefined
   error: ApiProblem | null
-  /** How many zones have a target, of how many: under a placeholder SKU only those are judged on HMI (ADR-0022) */
+  /** How many zones have a target, of how many: only those are judged on HMI (ADR-0027) */
   targets?: { set: number; zones: number }
 }) {
   if (error) {
@@ -75,28 +75,27 @@ export function MonitorBanner({ monitor, error, targets }: {
       </Banner>
     )
   }
-  // A placeholder SKU stands in for the missing SKU field: actual values, and the HMI setpoints of the zones
-  // the Rules tab gives it a target (ADR-0022, amended 2026-10-02)
-  const placeholder = Boolean(monitor.skuPlaceholder) && monitor.sku === monitor.skuPlaceholder
+  // A zone without a target has only its actual value judged (ADR-0027)
   const set = targets?.set ?? 0
-  const some = targets && set < targets.zones ? ` on the ${set} of ${targets.zones} zones with a target` : ''
-  const hmiNote = !placeholder
+  const partial = targets !== undefined && set < targets.zones
+  const some = partial ? ` on the ${set} of ${targets.zones} zones with a target` : ''
+  const hmiNote = !partial
     ? 'HMI mismatch is judged as usual (ADR-0010)'
     : set === 0
-      ? 'HMI mismatch waits for targets or the SKU field (ADR-0022)'
-      : `HMI mismatch is judged against the placeholder's targets${some}`
+      ? 'HMI mismatch waits for targets on Configuration → Rules (ADR-0027)'
+      : `HMI mismatch is judged${some}`
   return (
     <Banner tone={monitor.actualPaused ? 'warning' : 'normal'} icon={monitor.actualPaused ? TriangleAlert : CheckCircle2}
-            title={`${placeholder ? `Judging ${set === 0 ? 'actual values ' : ''}under the placeholder SKU ${monitor.sku}` : `Judging SKU ${monitor.sku}`} · Rules v${monitor.rulesVersion} · Mapping v${monitor.mappingVersion}`}>
+            title={`${partial && set === 0 ? 'Judging actual values' : 'Judging the line'} · Rules v${monitor.rulesVersion} · Mapping v${monitor.mappingVersion}`}>
       <p className="text-ink-soft">
         {monitor.actualPaused
           ? monitor.stop === 'warmup' && monitor.warmupUntil
             ? `Actual Warning/Critical rules are in the warm-up after a long stop until ${formatManilaFull(Date.parse(monitor.warmupUntil))} Manila; ${hmiNote}.`
             : `The machine is stopped: Actual Warning/Critical rules are paused; ${hmiNote}.`
-          : placeholder
+          : partial
             ? set === 0
-              ? "The machine doesn't publish its SKU yet (O-15): each actual value is judged against its setpoint. HMI mismatch waits for targets on Configuration → Rules, or the SKU field (ADR-0022)."
-              : `The machine doesn't publish its SKU yet (O-15): each actual value is judged against its setpoint, and each HMI setpoint against the placeholder's target on Configuration → Rules${some}. After a product change, update the targets (ADR-0022).`
+              ? 'No zone has a target yet: each actual value is judged against its setpoint. Give the zones their targets on Configuration → Rules to judge the HMI setpoints too (ADR-0027).'
+              : `Each actual value is judged against its setpoint, and each HMI setpoint against its zone's target${some}. Give the others targets on Configuration → Rules to judge theirs (ADR-0027).`
             : `Register ${monitor.registerVersion} · every change of state is kept as evidence.`}
       </p>
     </Banner>
