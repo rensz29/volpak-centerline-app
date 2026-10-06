@@ -65,7 +65,7 @@ files = {
         "audit_log": "logs/analytics-queries.jsonl",
         "database": app,
         "migrate_database": {**db, "user": "centerline", "password_file": "secrets/postgres-password"},
-        "auth": {"trusted_proxies": ["172.31.247.10"], "operator_workstations": []},
+        "auth": {"trusted_proxies": ["proxy"], "operator_workstations": []},
     },
     "monitor-core.json": {"database": app, "config_dir": ".", "instance": "centerline-docker", "journal_dir": "/app/data/journal"},
     "notifier.json": {"database": app, "config_dir": ".", "instance": "centerline-docker"},

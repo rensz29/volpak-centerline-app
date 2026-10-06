@@ -16,6 +16,10 @@ A temporary password must be changed before anything else works (IAM-03).
 
 from __future__ import annotations
 
+import ipaddress
+import socket
+import time
+
 from fastapi import Depends, Request
 from fastapi.responses import JSONResponse
 
@@ -29,10 +33,36 @@ CSRF_HEADER = "X-Centerline-CSRF"  # browsers can't add it to a cross-site reque
 UNSAFE = {"POST", "PUT", "PATCH", "DELETE"}
 
 
+RESOLVE_S = 30  # how long a proxy's looked-up address is kept
+_resolved: dict[str, tuple[float, frozenset[str]]] = {}
+
+
+def trusted_addresses(names: tuple[str, ...]) -> frozenset[str]:
+    """The proxies' addresses. An entry is an address, or a host name such as the Docker service `proxy`, looked up
+    again every 30 s: its address changes when its container is recreated, and Docker picks the network (ADR-0030)."""
+    out: set[str] = set()
+    now = time.monotonic()
+    for name in names:
+        try:
+            out.add(str(ipaddress.ip_address(name)))
+            continue
+        except ValueError:
+            pass
+        hit = _resolved.get(name)
+        if hit is None or now - hit[0] > RESOLVE_S:
+            try:
+                found = frozenset(str(ipaddress.ip_address(a[4][0])) for a in socket.getaddrinfo(name, None))
+            except OSError:
+                found = frozenset()  # not there (yet): nobody is trusted under that name
+            hit = _resolved[name] = (now, found)
+        out |= hit[1]
+    return frozenset(out)
+
+
 def client_ip(request: Request, s: AuthSettings) -> str:
     """The browser's address. Behind the proxy, the proxy's own X-Forwarded-For entry (the last one) counts."""
     peer = request.client.host if request.client else "unknown"
-    if peer in s.trusted_proxies:
+    if s.trusted_proxies and peer in trusted_addresses(s.trusted_proxies):
         forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
         if forwarded:
             return forwarded

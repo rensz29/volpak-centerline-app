@@ -95,15 +95,10 @@ services:
     depends_on:
       api: {condition: service_healthy}
     restart: unless-stopped
-    networks:
-      centerline:
-        ipv4_address: 172.31.247.10  # the api trusts its X-Forwarded-For (auth.trusted_proxies)
+    networks: [centerline]  # the api trusts its X-Forwarded-For by its name, "proxy" (auth.trusted_proxies)
 
 networks:
-  centerline:
-    ipam:
-      config:
-        - subnet: 172.31.247.0/24
+  centerline:  # Docker picks a free address range on each host
 
 volumes:
   pgdata:

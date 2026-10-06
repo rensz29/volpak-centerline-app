@@ -5,6 +5,8 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 
+from centerline_api.auth import deps
+
 from .conftest import FAST_AUTH, PASSWORD, add_account, new_client, sign_in
 
 OPERATOR = ["OPERATOR"]
@@ -162,6 +164,21 @@ def test_operators_sign_in_only_at_an_operator_workstation_and_never_time_out(ma
     assert (session["kind"], session["workstation"], session["idleLimitS"]) == ("operator", "Line desk", None)
     time.sleep(0.8)  # longer than the (shortened) Manager limit
     assert desk.get("/api/v1/monitoring/live").status_code == 200
+
+
+def test_behind_the_proxy_the_browsers_address_comes_from_it_trusted_by_its_name(make_client, database):
+    """The Docker stack's api trusts X-Forwarded-For from the proxy only, named by its service name (ADR-0030)."""
+    auth = replace(FAST_AUTH, operator_workstations=DESKS, trusted_proxies=("localhost",))
+    app = make_client(roles=None, auth=auth).app
+    add_account(app, database, OPERATOR, username="max")
+    body = {"name": "max", "password": PASSWORD}
+    stranger = new_client(app, "10.0.0.9")  # not the proxy: its header counts for nothing
+    r = stranger.post("/api/v1/auth/login", json=body, headers={"X-Forwarded-For": "10.0.0.5"})
+    assert r.json()["type"] == "/problems/not-an-operator-workstation" and "10.0.0.9" in r.json()["detail"]
+    proxy = new_client(app, "127.0.0.1")  # what "localhost" resolves to, as Docker's DNS resolves "proxy"
+    r = proxy.post("/api/v1/auth/login", json=body, headers={"X-Forwarded-For": "203.0.113.7, 10.0.0.5"})
+    assert r.status_code == 200 and r.json()["session"]["workstation"] == "Line desk"  # the proxy's own entry, the last
+    assert deps.trusted_addresses(("no-such-proxy.invalid", "10.1.2.3")) == frozenset({"10.1.2.3"})
 
 
 def test_one_operator_session_for_the_line_taken_over_after_5_minutes_without_a_heartbeat(make_client, database):

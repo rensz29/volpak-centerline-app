@@ -36,8 +36,10 @@
 3. **The proxy is the only way in:** Caddy with its own local CA, on `https://localhost:6040`, this PC only. It
    moved there from 8443 at the owner's request the same day.
    - It serves the web app and passes `/api` on. It overwrites `X-Forwarded-For`.
-   - The api trusts that header only from the proxy's fixed address on the stack's own network (172.31.247.0/24),
-     so the session cookie's `Secure` flag and the workstation rule (SES-04) work as designed.
+   - The api trusts that header only from the proxy, so the session cookie's `Secure` flag and the workstation rule
+     (SES-04) work as designed. It finds the proxy by its service name, `proxy`, through Docker's DNS, looked up every
+     30 s. Docker picks the stack's network range on each host. A fixed range, 172.31.247.0/24 at first, clashed
+     with another network on the second machine the same day.
    - The api and the database aren't published.
    - Each host sets in `deploy/.env` the names and addresses browsers use (the certificate covers each), the
      address and port it listens on, and the services' user id. This laptop listens on 127.0.0.1:6040; another
