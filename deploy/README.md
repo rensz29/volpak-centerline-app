@@ -12,10 +12,10 @@ Timebase**, on a database of its own. **Everything it writes is permanent**, as 
 | `monitor-core` | Subscribes, read-only, to the broker saved on the Connections tab, and judges every zone. MQTT client ID `centerline-monitor-centerline-docker` |
 | `notifier` | Delivers the outbox by the routing in effect |
 | `postgres` | PostgreSQL 17 with pgvector, in the `centerline_pgdata` volume. Not published |
+| `backup` | The backup agent ([ADR-0035](../docs/decisions/ADR-0035-backups-pg-dump.md)): a set every hour in `deploy/backups`, kept 48 hours, then the newest of each of 30 days and 12 months; the first set of each day is restored into a scratch database and checked; off-host copies once `deploy/.env` names a folder |
 | `clamav` | ClamAV's clamd: the api sends it every uploaded OCAP and guidance file before keeping it ([ADR-0031](../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)). Its signatures are in the `centerline_clamav-db` volume, and it updates them itself while it has the internet. Not published |
 
-The plan's other three containers come with their phases: ai-worker and ollama (Phase 3, once the AI model is chosen,
-O-01), backup-agent (Phase 5).
+The plan's other two containers come with Phase 3: ai-worker and ollama, once the AI model is chosen (O-01).
 
 **clamav** takes about 1 GB of memory once its signatures are loaded, which takes a minute or two after a start.
 Until it answers, uploads are refused ("the malware scanner isn't answering") and nothing else waits for it.
@@ -103,15 +103,62 @@ docker compose -f deploy/compose.yaml ps                    # what runs, and the
 docker compose -f deploy/compose.yaml logs -f monitor-core  # any service's log
 docker compose -f deploy/compose.yaml stop                  # stop everything; data stays
 docker compose -f deploy/compose.yaml up -d --build         # after a code change: rebuild and restart
-(umask 077; docker compose -f deploy/compose.yaml exec -T postgres pg_dump -U centerline -Fc centerline \
-   > config/history/centerline-docker-$(date +%F).dump)              # a backup, 0600
+docker compose -f deploy/compose.yaml exec backup python -m centerline_backup now   # a backup set now, as before a migration
 ```
 
 - **Restarts:** the containers restart by themselves after a crash or when Docker starts. A stopped one stays stopped.
 - **Switching HTTP and HTTPS:** change `CENTERLINE_SCHEME` in `deploy/.env`, then
   `docker compose -f deploy/compose.yaml up -d proxy api` (the api sets its cookie by it).
-- **Wiping:** `down -v` deletes the database, the journal and the proxy's CA. History is meant to be kept: back
-  it up first.
+- **Wiping:** `down -v` deletes the database, the journal and the proxy's CA. History is meant to be kept: the
+  backup sets in `deploy/backups` stay, because they're a folder on the host, not a volume.
+
+## Backups and restore
+
+The `backup` container ([ADR-0035](../docs/decisions/ADR-0035-backups-pg-dump.md)) writes a set every hour, two
+minutes past, in `deploy/backups/<UTC time>/`:
+- `centerline.dump`: the database, OCAPs included;
+- `globals.sql`: the roles;
+- `config.tar.gz`: `deploy/config`, with its secrets;
+- `manifest.json`: the checksums and the restore check.
+
+Kept: 48 hours of sets, the newest of each of the last 30 days, and of the last 12 months.
+
+```bash
+docker compose -f deploy/compose.yaml exec backup python -m centerline_backup list   # the sets, and the last run
+cat deploy/backups/status.json                                                       # last success, last error, off-host
+docker compose -f deploy/compose.yaml logs backup                                    # each run in one line
+```
+
+**Off-host (O-27):** set `CENTERLINE_BACKUP_OFFHOST` in `deploy/.env` to a folder on another disk or a mounted
+network share, then `docker compose -f deploy/compose.yaml up -d backup`. Each set is copied there and checked. The
+sets hold every record and this PC's secrets: keep that place as restricted as `deploy/config`. Until it's set, the
+status says the sets are on this PC only, and a disk failure takes them with the database.
+
+**Restore** (a damaged database, or a new PC after a hardware failure):
+
+```bash
+deploy/restore.sh deploy/backups/20261007T120200Z            # or a set from the off-host folder
+deploy/restore.sh deploy/backups/20261007T120200Z --replace  # this PC's database has records: replace them
+docker compose -f deploy/compose.yaml up -d                  # then start the stack
+```
+
+It checks the set's checksums and takes `deploy/config` from the set when the PC has none. It then:
+- starts only postgres;
+- restores the roles and sets their passwords to this PC's secret files;
+- restores the database and checks its audit chain.
+
+It starts nothing else. On a new PC: install Docker, clone the repository, restore, check `deploy/.env`, run
+`deploy/setup.sh` (it adds only what's missing), start. Everything after the set's time is lost: at most an hour.
+
+**Restore drill (quarterly, BKP-02):** on a clean machine without the internet, restore the newest off-host set and
+start the stack with monitor-core stopped (`docker compose … up -d` then `docker compose … stop monitor-core`), sign
+in, and record the time from start to sign-in. On a PC with the stack running, a drill can run beside it as its own
+project, which touches nothing of the running stack:
+
+```bash
+CENTERLINE_PROJECT=centerline-drill deploy/restore.sh deploy/backups/<set>   # a new, empty database server
+docker compose -p centerline-drill -f deploy/compose.yaml down -v            # afterwards: only the drill's volumes
+```
 
 ## What this rehearsal can't show
 

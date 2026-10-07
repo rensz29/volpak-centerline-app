@@ -54,7 +54,10 @@ Phase 1 UI prototype (`client/`) differs from the target.
 > devices needn't trust a certificate; HTTPS stays one setting away, and go-live's choice is O-25 ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)).
 > The Digital Centerline page then gained a **line view**: the counts and the Volpak filler in 3D, drawn after its general
 > arrangement, with each monitored zone a part coloured by monitor-core's states and the selected zone's values and checks
-> beside it; the zone table below stays the full record ([ADR-0033](decisions/ADR-0033-line-view-3d.md)).
+> beside it; the zone table below stays the full record ([ADR-0033](decisions/ADR-0033-line-view-3d.md)). On 2026-10-07 it became
+> the owner's Blender model of the SI-360 ([ADR-0034](decisions/ADR-0034-line-view-blender-model.md)), and **Phase 5 began with the
+> backups**: an hourly set kept here and off-host, checked by a daily restore, and a restore script
+> ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)).
 
 ID conventions used throughout (same as the SDD):
 
@@ -182,7 +185,7 @@ records, so live monitoring and Analytics see the same values.
 | **ai-worker** | OCAP parsing, embedding, retrieval, clarification, summary, translation | continues (deterministic fallback) | AI, OCP, LAN-01 |
 | **ollama** | Pinned language + embedding models | continues | AI-01 |
 | **clamav** (built, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) | Scans every upload before storage (clamd's INSTREAM) | continues; uploads are refused until it answers | SEC-01 |
-| **backup-agent** | pgBackRest hourly incr. + daily full + WAL; OCAP files; off-host copy | continues | BKP-01 |
+| **backup-agent** | **Built** as the `backup` container ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)): an hourly set (pg_dump of the database with its OCAPs, the roles, `deploy/config`), kept 48 h + 30 daily + 12 monthly, copied off-host, the day's first set restored and checked; the SDD had pgBackRest | continues | BKP-01/02 |
 
 **DD-01** Acquisition and rules share one process — single writer per parameter, no race on
 event state, 2 s budget met in-memory.
@@ -250,7 +253,8 @@ volpak-digital-centerline/
 │  │                           are in common/ (the api uses them for TEST messages and re-drives)
 │  ├─ ai_worker/               ingest/, retrieve/, generate/, verify/, fallback/ (not yet: the api reads the files and
 │  │                           searches by keyword until then, ADR-0031)
-│  └─ backup_agent/            pgBackRest config + file copy jobs
+│  └─ backup_agent/            (built, ADR-0035) the hourly backup sets, their retention, off-host copy and restore check;
+│                              deploy/restore.sh restores one
 ├─ db/
 │  ├─ migrations/              (built: 0001 configuration … 0006 the services' role, 0007 placeholder SKU, 0008 notifications, 0009 the reason workflow, 0010 TRUNCATE guards, 0011 no SKU, 0012 idempotency keys, 0013 Analytics ranges, 0014 the OCAP library) plain SQL in order, recorded with hashes
 │  └─ seed/                    rules-proposal.json (ADR-0012), routing-proposal.json (ADR-0023); later line, parameters, zones, units
@@ -922,6 +926,16 @@ Administrator alert repeats until storage is fixed. Protected records are never 
 
 ### Backup (BKP-01/02)
 
+> **Built** ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)), instead of the SDD's pgBackRest:
+> - **A set every hour:** a full `pg_dump` of the database (the OCAPs and files are in it, ADR-0031), the roles, and
+>   `deploy/config`, with checksums. It loses an hour at most (RPO).
+> - **Kept:** 48 hours of sets, the newest of each of 30 days, and of each of 12 months, here and in the off-host
+>   folder `deploy/.env` names (O-27).
+> - **Checked:** the first set of each day is restored into a scratch database and its audit chain checked.
+> - **Restored by `deploy/restore.sh`:** 6 s onto a new server in the first drill.
+>
+> The SDD's plan, for reference:
+
 - pgBackRest: daily full + hourly incremental + continuous WAL archiving.
 - OCAP files, attachments, configuration and model files copied daily **and after every
   OCAP activation**.
@@ -1064,6 +1078,17 @@ generated OCAPs. **G3 still needs:**
 - the Filipino interface (LAN-01);
 - the plant's real OCAPs.
 
+**Phase 5 started on 2026-10-07 with the backups** ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)): an hourly set of the
+database, the roles and the settings, kept 48 hours, 30 days and 12 months here and off-host, the day's first set
+restored and checked, and `deploy/restore.sh`, which restored it onto a new server in 6 seconds. **G5 still needs:**
+- the off-host place (O-27);
+- the quarterly drill on a clean, offline machine;
+- the offline install kit;
+- AT-07: offline operation, buffer replay, storage degraded mode (O-12) and restart recovery;
+- the performance run;
+- the parallel run on the line;
+- the signed approval record.
+
 **Phase 0 is under way** (started 2026-09-29): tasks, evidence, gate status and the requests
 to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tracked in
 [phase-0.md](phase-0.md).
@@ -1141,6 +1166,7 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 | O-24 | ClamAV's signatures on the plant network without the internet: a local mirror, an offline update kit, or a route to the signature servers that IT allows | Medium | Upload scanning at the plant (SEC-01, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)). Where it has the internet, the clamav container updates itself |
 | O-25 | HTTP or HTTPS on the control-room PC: the SDD wants HTTPS on the LAN; the Docker stack serves plain HTTP for testing ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)). HTTPS needs a certificate the workstations trust (Caddy's CA installed on each, or one from IT) | High | Go-live (G5): passwords and session cookies cross the LAN unencrypted over HTTP |
 | O-26 | The line view's placement of the zones on the machine model: that Front and Rear are the jaws named F and R, the order of the vertical seals, and where V6, the dosing nozzles and the gauge (drawn by the page, not modelled yet) really are. Szyrelle confirms them at the machine with maintenance | Low | The line view ([ADR-0033](decisions/ADR-0033-line-view-3d.md), [ADR-0034](decisions/ADR-0034-line-view-blender-model.md)); the judging is unaffected |
+| O-27 | The backups' off-host place: a network share or a second disk, restricted like `deploy/config` (the sets hold every record and the PC's secrets), and whether IT wants the sets encrypted | High | BKP-01's off-host copies; until then the sets are on the PC only ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)) |
 
 Until an O-item closes, implement the affected value as **configuration with a clearly
 marked placeholder default**, never as a hard-coded constant.

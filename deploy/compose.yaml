@@ -1,5 +1,5 @@
-# Centerline on one Docker host (SDD §3, ADR-0030): the six containers built so far. The plan's others come
-# with their phases: ai-worker and ollama (Phase 3, after O-01/G0c), backup-agent (Phase 5).
+# Centerline on one Docker host (SDD §3, ADR-0030): the seven containers built so far. The plan's others come
+# with their phases: ai-worker and ollama (Phase 3, after O-01/G0c).
 #
 #   deploy/setup.sh                                      # once: this host's settings in deploy/config
 #   docker compose -f deploy/compose.yaml up -d --build  # then http://localhost:6040 (https:// with CENTERLINE_SCHEME=https)
@@ -79,6 +79,19 @@ services:
       - ./config:/app/config:ro
     depends_on:
       api: {condition: service_healthy}
+
+  backup:  # BKP-01/02 (ADR-0035): a set every hour, kept 48 h, the newest of 30 days and of 12 months, here and off-host
+    <<: *python
+    command: ["python", "-m", "centerline_backup"]
+    environment:
+      CENTERLINE_BACKUP_CONFIG: /app/config/backup.json
+      CENTERLINE_OFFHOST: ${CENTERLINE_BACKUP_OFFHOST:+/offhost}  # empty unless deploy/.env names an off-host folder
+    volumes:
+      - ./config:/app/config:ro  # each set carries these settings and secrets, for a restore on another PC
+      - ${CENTERLINE_BACKUP_DIR:-./backups}:/backups  # a folder on the host: it outlives the stack's volumes
+      - ${CENTERLINE_BACKUP_OFFHOST:-./backups/no-offhost}:/offhost
+    depends_on:
+      api: {condition: service_healthy}  # the api migrates the database first
 
   clamav:  # scans every uploaded OCAP and guidance file before it's kept (SEC-01, ADR-0031)
     image: clamav/clamav:stable

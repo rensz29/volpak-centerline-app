@@ -71,6 +71,14 @@ files = {
     },
     "monitor-core.json": {"database": app, "config_dir": ".", "instance": "centerline-docker", "journal_dir": "/app/data/journal"},
     "notifier.json": {"database": app, "config_dir": ".", "instance": "centerline-docker"},
+    # The owner: the roles (pg_dumpall) and the daily restore check's scratch database need it (ADR-0035)
+    "backup.json": {
+        "_note": "The Docker stack's backup agent (ADR-0035). The sets go to /backups: CENTERLINE_BACKUP_DIR in deploy/.env, else deploy/backups.",
+        "database": {**db, "user": "centerline", "password_file": "secrets/postgres-password"},
+        "config_dir": ".",
+        "backup_dir": "/backups",
+        "keep": {"hours": 48, "days": 30, "months": 12},
+    },
 }
 for name, content in files.items():
     path = os.path.join(dst, name)
@@ -91,6 +99,11 @@ if "scanner" not in api:
     print("added    the malware scanner (clamav) to api.json")
 EOF
 
+# The backups' folder, made here so Docker doesn't make it as root (ADR-0035). The sets hold every record and this
+# host's secrets: this user only
+mkdir -p "$repo/deploy/backups/no-offhost"
+chmod 700 "$repo/deploy/backups"
+
 # Where browsers reach it: this PC only, until deploy/.env says otherwise
 if [[ ! -e "$repo/deploy/.env" ]]; then
   cat > "$repo/deploy/.env" <<'ENV'
@@ -110,6 +123,19 @@ CENTERLINE_PORT=6040
 ENV
   echo "CENTERLINE_UID=$(id -u)" >> "$repo/deploy/.env"
   echo "wrote    deploy/.env (this PC only, port 6040, user id $(id -u))"
+fi
+
+# The backups' places (ADR-0035), added once to a deploy/.env from before them
+if ! grep -q CENTERLINE_BACKUP_OFFHOST "$repo/deploy/.env"; then
+  cat >> "$repo/deploy/.env" <<'ENV'
+
+# Backups (ADR-0035): a set every hour in deploy/backups, or the folder CENTERLINE_BACKUP_DIR names. An off-host copy
+# goes to CENTERLINE_BACKUP_OFFHOST: a folder on another disk or a mounted network share. Until it's set, the sets
+# are only on this PC. Then: docker compose -f deploy/compose.yaml up -d backup
+#CENTERLINE_BACKUP_DIR=
+#CENTERLINE_BACKUP_OFFHOST=
+ENV
+  echo "added    the backup settings to deploy/.env (no off-host folder yet)"
 fi
 
 echo "deploy/config is ready. Next: docker compose -f deploy/compose.yaml up -d --build (see deploy/README.md)"

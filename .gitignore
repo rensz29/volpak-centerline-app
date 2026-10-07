@@ -6,8 +6,9 @@
 # (client/src/data) belong in git; the tools keep theirs out with their own .gitignore
 /data/
 
-# The Docker stack's settings and secrets on this host (deploy/setup.sh)
+# The Docker stack's settings and secrets on this host (deploy/setup.sh), and its backups (ADR-0035)
 deploy/config/
+deploy/backups/
 
 # Python
 __pycache__/
@@ -22,6 +23,9 @@ node_modules/
 *.dump
 .env
 .env.*
+
+# Blender's copy of a .blend from before each save (tools/twin-model/)
+*.blend1
 
 # Editors and OS
 .idea/

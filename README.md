@@ -16,6 +16,7 @@ something, it is authoritative. Phase 0 progress is tracked in [docs/phase-0.md]
 | [services/api/](services/api/README.md) | The api (FastAPI): sign-in, configuration, live monitoring, alarms, reasons, the OCAP library, notifications, Analytics |
 | [services/monitor_core/](services/monitor_core/README.md) | monitor-core: subscribes to the broker, judges every zone, writes events and the outbox |
 | [services/notifier/](services/notifier/README.md) | The notifier: delivers the outbox to Teams and email |
+| [services/backup_agent/](services/backup_agent/README.md) | The backup agent: an hourly set of the database, roles and settings, kept here and off-host, checked by a daily restore |
 | `services/common/` | Code the services share, with no web framework in it |
 | `db/` | Plain SQL migrations, applied in order by the api, and the seed proposals |
 | [deploy/](deploy/README.md) | The application in Docker: `compose.yaml`, the images, the proxy's Caddyfile, `setup.sh` (ADR-0030) |
@@ -39,7 +40,8 @@ something, it is authoritative. Phase 0 progress is tracked in [docs/phase-0.md]
 
 ## Deploy on another machine
 
-The application runs as five containers: the proxy, api, monitor-core, notifier and PostgreSQL. They judge the real
+The application runs as seven containers: the proxy, api, monitor-core, notifier, PostgreSQL, ClamAV and the backup
+agent. They judge the real
 machine on the plant broker and read the real Timebase, on the machine's own database
 ([deploy/README.md](deploy/README.md), [ADR-0030](docs/decisions/ADR-0030-docker-stack.md)). Everything it writes is
 permanent history.
@@ -189,14 +191,14 @@ The services run as user id 1000. If `deploy/config` belongs to another user the
 
 ```bash
 git pull && docker compose -f deploy/compose.yaml up -d --build      # a new version; the api migrates the database
-(umask 077; docker compose -f deploy/compose.yaml exec -T postgres pg_dump -U centerline -Fc centerline \
-   > backup-$(date +%F).dump)                                         # a backup, until the backup-agent (Phase 5)
+docker compose -f deploy/compose.yaml exec backup python -m centerline_backup list   # the hourly backups (ADR-0035)
 docker compose -f deploy/compose.yaml stop                           # stop; everything stays
 docker compose -f deploy/compose.yaml logs -f monitor-core           # any service's log
 ```
 
-The containers restart by themselves after a crash or a reboot, unless stopped. `down -v` deletes the database: back
-up first.
+The containers restart by themselves after a crash or a reboot, unless stopped. `down -v` deletes the database; the
+hourly backup sets in `deploy/backups` stay. Set an off-host folder for them in `deploy/.env`, and restore with
+`deploy/restore.sh` ([deploy/README.md](deploy/README.md#backups-and-restore)).
 
 ## Tests
 

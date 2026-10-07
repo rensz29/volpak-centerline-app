@@ -1,7 +1,8 @@
 # Phase 0: foundations and spikes (tracker)
 
-Status on **2026-10-01**. Phase 0 proves what the design assumes before
-Phase 1 builds on it. Gates come from [ADR-0005](decisions/ADR-0005-split-gate-g0.md).
+Status on **2026-10-07**: nothing here has moved since 2026-10-01. The control-room PC (0.8), the plant clocks
+(0.10), P09's tags (0.12) and the URS approval (0.13) are still open, and G0b still waits on 0.8 and M7. Phase 0
+proves what the design assumes before Phase 1 builds on it. Gates come from [ADR-0005](decisions/ADR-0005-split-gate-g0.md).
 Evidence files under `tools/*/data/` are plant data: they stay on this laptop
 and out of git.
 

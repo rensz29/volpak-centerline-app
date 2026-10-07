@@ -1,4 +1,4 @@
-# The Python services in one image: the api, monitor-core and the notifier, each with its own command
+# The Python services in one image: the api, monitor-core, the notifier and the backup agent, each with its own command
 # (deploy/compose.yaml). The repository root is /app, as the code expects (centerline_common.db.REPO):
 # the migrations and seeds in /app/db, this host's settings and secrets mounted at /app/config.
 FROM python:3.12-slim
@@ -6,7 +6,12 @@ FROM python:3.12-slim
 ARG UID=1000
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/services/common:/app/services/api:/app/services/monitor_core:/app/services/notifier
+    PYTHONPATH=/app/services/common:/app/services/api:/app/services/monitor_core:/app/services/notifier:/app/services/backup_agent
+
+# The backup agent's pg_dump, pg_dumpall, pg_restore and psql (ADR-0035): PostgreSQL 17's, as the server's
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client-17 \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app/services
 COPY services/requirements.txt /tmp/requirements.txt
@@ -20,6 +25,7 @@ COPY services/common common
 COPY services/api/centerline_api api/centerline_api
 COPY services/monitor_core/centerline_monitor monitor_core/centerline_monitor
 COPY services/notifier/centerline_notifier notifier/centerline_notifier
+COPY services/backup_agent/centerline_backup backup_agent/centerline_backup
 
 # The same uid as the host's config folder, which is bind-mounted; the journal folder seeds its volume, 0700 (RES-01)
 RUN useradd --uid "${UID}" --home-dir /app --no-create-home centerline \
