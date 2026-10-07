@@ -52,6 +52,9 @@ Phase 1 UI prototype (`client/`) differs from the target.
 > reason workflow's OCAP steps, up to three sections with their exact source; and a Manager's guidance with a file, or kept as a
 > reusable OCAP ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)). The Docker stack then moved to plain HTTP by default, so testers'
 > devices needn't trust a certificate; HTTPS stays one setting away, and go-live's choice is O-25 ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)).
+> The Digital Centerline page then gained a **line view**: the counts and the Volpak filler in 3D, drawn after its general
+> arrangement, with each monitored zone a part coloured by monitor-core's states and the selected zone's values and checks
+> beside it; the zone table below stays the full record ([ADR-0033](decisions/ADR-0033-line-view-3d.md)).
 
 ID conventions used throughout (same as the SDD):
 
@@ -209,7 +212,9 @@ The prototype's empty `server/server.js` is gone. Layout, with what's built mark
 volpak-digital-centerline/
 ├─ client/                     React + TS UI (existing prototype, evolves in place)
 │  ├─ src/services/            mockApi.ts → apiClient.ts (the single seam, keep it)
-│  ├─ src/components/live/     (built, ADR-0015) the live Digital Centerline page: zone table, open events, event sheet
+│  ├─ src/components/live/     (built, ADR-0015) the live Digital Centerline page: zone table, open events, event sheet;
+│  │                           the line view and its 3D machine in live/twin/ (ADR-0033), the owner's Blender model
+│  │                           from tools/twin-model/ (ADR-0034)
 │  ├─ src/pages/ReasonsPage.tsx  (built, ADR-0025) the Reasons page, with components/workflow/ (the OCAP step and the
 │  │                           guidance form too, ADR-0031); the shift warning is in components/auth/
 │  └─ src/pages/OcapLibraryPage.tsx  (built, ADR-0031) the OCAP library: search, upload, versions, with components/ocap/
@@ -1135,6 +1140,7 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 | O-23 | `Idempotency-Key` on creating POSTs and timestamps ending in `Z` (§11) | Medium | **Closed** 2026-10-06: both built ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)) |
 | O-24 | ClamAV's signatures on the plant network without the internet: a local mirror, an offline update kit, or a route to the signature servers that IT allows | Medium | Upload scanning at the plant (SEC-01, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)). Where it has the internet, the clamav container updates itself |
 | O-25 | HTTP or HTTPS on the control-room PC: the SDD wants HTTPS on the LAN; the Docker stack serves plain HTTP for testing ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)). HTTPS needs a certificate the workstations trust (Caddy's CA installed on each, or one from IT) | High | Go-live (G5): passwords and session cookies cross the LAN unencrypted over HTTP |
+| O-26 | The line view's placement of the zones on the machine model: that Front and Rear are the jaws named F and R, the order of the vertical seals, and where V6, the dosing nozzles and the gauge (drawn by the page, not modelled yet) really are. Szyrelle confirms them at the machine with maintenance | Low | The line view ([ADR-0033](decisions/ADR-0033-line-view-3d.md), [ADR-0034](decisions/ADR-0034-line-view-blender-model.md)); the judging is unaffected |
 
 Until an O-item closes, implement the affected value as **configuration with a clearly
 marked placeholder default**, never as a hard-coded constant.

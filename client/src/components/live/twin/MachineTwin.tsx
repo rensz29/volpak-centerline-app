@@ -1,12 +1,14 @@
-import { RotateCcw } from 'lucide-react'
+import { Loader2, RotateCcw } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import type { Object3D } from 'three'
 import WebGL from 'three/addons/capabilities/WebGL.js'
 
 import { cn } from '@/utils/cn'
 
 import { withUnit, type Tone } from '../liveModel'
 import { GLOW } from './glow'
+import { loadModel } from './loadModel'
 import { PLACE, STATIONS, worstTone, type Station, type StationId, type TwinZone } from './stations'
 import { createTwinScene, type TwinScene } from './twinScene'
 import { TwinUnavailable } from './TwinUnavailable'
@@ -85,14 +87,29 @@ export default function MachineTwin({ zones, running, line, selected, onSelect }
   // three.js draws with WebGL 2; anything else the scene throws reaches the line view's error boundary
   const [supported] = useState(() => WebGL.isWebGL2Available())
   const [hovered, setHovered] = useState<string | null>(null)
+  // The owner's model (ADR-0034), as a maker of fresh copies: undefined while it loads, null if it can't, and
+  // the scene then draws the machine in code (ADR-0033)
+  const [model, setModel] = useState<(() => Object3D) | null | undefined>(undefined)
+
+  useEffect(() => {
+    if (!supported) return
+    let live = true
+    void loadModel().then((loaded) => {
+      // Wrapped: a function given to a state setter is an updater
+      if (live) setModel(() => loaded)
+    })
+    return () => {
+      live = false
+    }
+  }, [supported])
 
   useEffect(() => {
     selectRef.current = onSelect
   }, [onSelect])
 
   useEffect(() => {
-    if (!host.current) return
-    const scene = createTwinScene(host.current, { hover: setHovered, select: (channel) => selectRef.current(channel) })
+    if (!host.current || model === undefined) return
+    const scene = createTwinScene(host.current, { hover: setHovered, select: (channel) => selectRef.current(channel) }, model?.() ?? null)
     twin.current = scene
     setCards(scene.cards)
     return () => {
@@ -100,7 +117,7 @@ export default function MachineTwin({ zones, running, line, selected, onSelect }
       twin.current = null
       setCards(null)
     }
-  }, [])
+  }, [model])
 
   const byStation = useMemo(
     () => Object.fromEntries(STATIONS.map((s) => [s.id, zones.filter((z) => PLACE[z.channel] === s.id)])) as Record<StationId, TwinZone[]>,
@@ -118,11 +135,25 @@ export default function MachineTwin({ zones, running, line, selected, onSelect }
     })
   }, [zones, byStation, line, running, selected, hovered, cards])
 
+  // A new selection flies the camera to its part; clearing it flies back to the whole machine
+  const focused = useRef<string | null>(null)
+  useEffect(() => {
+    if (!twin.current || focused.current === selected) return
+    focused.current = selected
+    twin.current.focus(selected)
+  }, [selected, cards])
+
   if (!supported) return <TwinUnavailable detail="This browser has WebGL 2 switched off or unavailable, and the model needs it." />
 
   return (
     <div className="relative h-full w-full">
       <div ref={host} className="absolute inset-0" />
+      {model === undefined && (
+        <div className="text-nav-fg absolute inset-0 z-[2] flex items-center justify-center gap-2 text-[12px]">
+          <Loader2 className="size-4 animate-spin" aria-hidden />
+          Loading the 3D view…
+        </div>
+      )}
       {/* Darkens the edges so the machine stands out; under the callouts */}
       <div className="from-twin-floor/0 to-twin-floor/80 pointer-events-none absolute inset-0 z-[1] bg-radial-[at_50%_42%] from-55%" aria-hidden />
       {cards &&

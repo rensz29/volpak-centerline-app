@@ -54,7 +54,7 @@ together — there is no denormalised copy that can drift out of step.
 
 | Route | Purpose |
 |---|---|
-| `/centerline` | **Live.** Digital Centerline, the default route: whether monitor-core is judging and why not, counts, every zone's Target / HMI setpoint / Actual with the HMI and Actual checks and their countdowns, the open events and each one's evidence, recently closed events and brief changes |
+| `/centerline` | **Live.** Digital Centerline, the default route: whether monitor-core is judging and why not, the line view (counts, and the machine in 3D with each zone where it sits, [ADR-0033](../docs/decisions/ADR-0033-line-view-3d.md)), every zone's Target / HMI setpoint / Actual with the HMI and Actual checks and their countdowns, the open events and each one's evidence, recently closed events and brief changes |
 | `/analytics` | **Analytics & Correlation** — parameter panel with X/Y axis assignment, scatter analysis with regression, trend comparison, 9 summary statistics, raw records table with CSV export |
 | `/alarms/active` | **Live.** Every open event, Criticals first, filtered by kind; each opens its evidence sheet, where a Manager acknowledges a Critical |
 | `/alarms/history` | **Live.** Every closed event, newest first, filtered by kind, zone and time, paged; Managers and Administrators export it as UTF-8 CSV |
@@ -80,8 +80,11 @@ src/
     alarms/      AlarmPanel, AlarmCard, AlarmDetailsDialog, useAlarmActions
     auth/        signing in: AuthFrame, PasswordForm, IdleWarning
     accounts/    the Accounts page's dialogs: account, temporary password
-    live/        the live Digital Centerline page: MonitorBanner, ZoneTable, OpenEvents,
+    live/        the live Digital Centerline page: MonitorBanner, LineView, ZoneTable, OpenEvents,
                  EventSheet, RecentActivity, liveModel (names and colours for monitor-core's states)
+      twin/      the line view's 3D machine: stations (zone → station), fromModel (the owner's Blender
+                 model, volpak-si360.glb, ADR-0034), buildMachine (the machine drawn in code, the fallback),
+                 parts (what both share), twinScene (camera, callouts, drawing), MachineTwin (lazy), ZonePanel
     correlation/ the live Analytics page: variable pickers, ECharts scatter and trend, statistics
     setup/       the live Configuration page: MqttConnectionCard, HistorianConnectionCard,
                  TagRegister, ParameterEditor, TagPicker, FormParts
@@ -180,6 +183,10 @@ raw palette values.
 Status is never carried by colour alone — every badge pairs the hue with a dot, an
 icon and a written label.
 
+The **line view** on Digital Centerline sits on the navy chrome. There the status hues are the
+`-glow` tokens (`text-normal-glow` …), which read on navy as the others do on white, and the 3D
+scene takes its colours from the same tokens at runtime.
+
 ---
 
 ## Digital Centerline: live
@@ -188,6 +195,19 @@ icon and a written label.
 monitor-core ([services/monitor_core](../services/monitor_core/README.md)) judged. It
 refreshes every 2 s while the tab is visible:
 
+- **The line view** ([ADR-0033](../docs/decisions/ADR-0033-line-view-3d.md)), under the banner:
+  - the counts, with the machine's state: running, stopped, warm-up, or no data;
+  - the Volpak filler in 3D: the owner's Blender model (`tools/twin-model/volpak-si360.blend`, exported to
+    `twin/volpak-si360.glb`, [ADR-0034](../docs/decisions/ADR-0034-line-view-blender-model.md)), or the machine
+    drawn in code when it can't load. Each monitored zone is a part, found by its object name in the model
+    (`twin/fromModel.ts`) and coloured by monitor-core's state. A callout per
+    station lists its zones with their actual values. A Warning or a Critical gets a ring, and a Critical
+    pulses. The stack light shows the line's worst state. The machine moves only while monitor-core reports it
+    running, and never with reduced motion;
+  - selecting a part, a callout's zone or a station flies to it. The side panel then shows the zone's three
+    values, a gauge of its bands, the table's HMI and Actual checks, and its open events;
+  - **Full screen** and **Hide 3D** (remembered per browser). three.js loads on its own chunk after the data.
+    Without WebGL 2 the panel says so, and the rest of the page works as before.
 - **The banner** says whether it's judging, under which versions, or why not:
   - a paused snapshot gate, with the reasons;
   - Actual rules paused while the machine is stopped or warming up;

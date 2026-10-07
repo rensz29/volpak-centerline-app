@@ -1,5 +1,6 @@
 import {
   ACESFilmicToneMapping,
+  AdditiveBlending,
   Box3,
   BufferGeometry,
   CanvasTexture,
@@ -13,6 +14,7 @@ import {
   Material,
   Mesh,
   MeshBasicMaterial,
+  NormalBlending,
   PerspectiveCamera,
   PlaneGeometry,
   PMREMGenerator,
@@ -31,7 +33,9 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js'
 import { CSS2DObject, CSS2DRenderer } from 'three/addons/renderers/CSS2DRenderer.js'
 
 import type { Tone } from '../liveModel'
-import { buildMachine, glowTexture, type Machine } from './buildMachine'
+import { buildMachine } from './buildMachine'
+import { machineFromModel } from './fromModel'
+import { glowTexture, ringTexture, type Machine } from './parts'
 import { STATIONS, type StationId } from './stations'
 
 /**
@@ -56,14 +60,14 @@ export interface TwinScene {
   /** The callout cards' elements, for React to render into */
   cards: Record<StationId, HTMLElement>
   update(state: TwinState): void
+  /** Flies to a zone's part, or back to the whole machine */
+  focus(channel: string | null): void
   resetView(): void
   dispose(): void
 }
 
 const FRAME_MS = 1000 / 30
-const HOME_DIRECTION = new Vector3(-0.36, 0.42, 0.83).normalize()
-/** Above the machine's middle, so it sits low in the frame and the callouts fit above it */
-const HOME_TARGET = new Vector3(0.1, 1.95, 0)
+const HOME_DIRECTION = new Vector3(-0.34, 0.33, 0.88).normalize()
 
 /** A design token, as the scene's colour */
 function token(name: string): Color {
@@ -86,8 +90,16 @@ function shadowTexture(): CanvasTexture {
   return texture
 }
 
-/** Throws when the browser can't give a WebGL context; the line view's error boundary then says so. */
-export function createTwinScene(host: HTMLElement, events: { hover(channel: string | null): void; select(channel: string | null): void }): TwinScene {
+/**
+ * Throws when the browser can't give a WebGL context; the line view's error boundary then says so.
+ * `model` is the owner's model of the machine (ADR-0034), the scene's own copy, which it frees when it
+ * closes; null, or a model that can't be read, draws the machine in code (ADR-0033).
+ */
+export function createTwinScene(
+  host: HTMLElement,
+  events: { hover(channel: string | null): void; select(channel: string | null): void },
+  model: Object3D | null = null,
+): TwinScene {
   const renderer = new WebGLRenderer({ antialias: true })
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
   renderer.outputColorSpace = SRGBColorSpace
@@ -122,9 +134,9 @@ export function createTwinScene(host: HTMLElement, events: { hover(channel: stri
   const environment = pmrem.fromScene(room, 0.04).texture
   room.dispose()
   scene.environment = environment
-  scene.environmentIntensity = 0.55
-  scene.add(new HemisphereLight(0xdbeafe, colors.floor, 0.7))
-  const key = new DirectionalLight(0xffffff, 1.7)
+  scene.environmentIntensity = 0.5
+  scene.add(new HemisphereLight(0xdbeafe, colors.floor, 0.6))
+  const key = new DirectionalLight(0xffffff, 1.5)
   key.position.set(-6, 10, 8)
   const rim = new DirectionalLight(0x93c5fd, 0.6)
   rim.position.set(8, 5, -7)
@@ -136,20 +148,31 @@ export function createTwinScene(host: HTMLElement, events: { hover(channel: stri
   gridMaterial.transparent = true
   gridMaterial.opacity = 0.55
   scene.add(grid)
-  const shadow = new Mesh(new PlaneGeometry(15.5, 3.6), new MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false }))
-  shadow.rotation.x = -Math.PI / 2
-  shadow.position.set(0.1, 0.004, 0)
-  scene.add(shadow)
 
   const glow = glowTexture()
-  const machine: Machine = buildMachine(glow)
+  const ring = ringTexture()
+  const fromCode = () => buildMachine(glow, ring)
+  let machine: Machine
+  try {
+    machine = model ? machineFromModel(model, glow, ring) : fromCode()
+  } catch {
+    // A model the line view can't make sense of: the machine drawn in code still shows every zone
+    machine = fromCode()
+  }
   scene.add(machine.root)
-  const corners = (() => {
-    const box = new Box3().setFromObject(machine.root)
-    return [box.min.x, box.max.x].flatMap((x) =>
-      [box.min.y, box.max.y].flatMap((y) => [box.min.z, box.max.z].map((z) => new Vector3(x, y, z))),
-    )
-  })()
+  const box = new Box3().setFromObject(machine.root)
+  const corners = [box.min.x, box.max.x].flatMap((x) =>
+    [box.min.y, box.max.y].flatMap((y) => [box.min.z, box.max.z].map((z) => new Vector3(x, y, z))),
+  )
+  /** Above the machine's middle, so it sits low in the frame and the callouts fit above it */
+  const homeTarget = new Vector3((box.min.x + box.max.x) / 2, box.max.y * 0.6, (box.min.z + box.max.z) / 2)
+  const shadow = new Mesh(
+    new PlaneGeometry(box.max.x - box.min.x + 2, box.max.z - box.min.z + 1.6),
+    new MeshBasicMaterial({ map: shadowTexture(), transparent: true, depthWrite: false }),
+  )
+  shadow.rotation.x = -Math.PI / 2
+  shadow.position.set(homeTarget.x, 0.004, homeTarget.z)
+  scene.add(shadow)
 
   // A callout per station: a pin on the machine, a leader line, and a card React renders into
   const outlineHover = new LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.55, depthTest: false })
@@ -184,7 +207,7 @@ export function createTwinScene(host: HTMLElement, events: { hover(channel: stri
   const controls = new OrbitControls(camera, renderer.domElement)
   controls.enableDamping = true
   controls.dampingFactor = 0.08
-  controls.minDistance = 3
+  controls.minDistance = 1.2
   controls.maxDistance = 32
   controls.maxPolarAngle = 1.5
   controls.screenSpacePanning = true
@@ -195,22 +218,31 @@ export function createTwinScene(host: HTMLElement, events: { hover(channel: stri
     let far = 80
     for (let i = 0; i < 22; i++) {
       const d = (near + far) / 2
-      camera.position.copy(HOME_TARGET).addScaledVector(HOME_DIRECTION, d)
-      camera.lookAt(HOME_TARGET)
+      camera.position.copy(homeTarget).addScaledVector(HOME_DIRECTION, d)
+      camera.lookAt(homeTarget)
       camera.updateMatrixWorld()
-      const fits = corners.every((c) => {
-        const p = c.clone().project(camera)
-        return Math.abs(p.x) <= 0.94 && Math.abs(p.y) <= 0.9
-      })
+      // The machine inside the frame, and room for the callout cards above and below it
+      const fits =
+        corners.every((c) => {
+          const p = c.clone().project(camera)
+          return Math.abs(p.x) <= 0.94 && Math.abs(p.y) <= 0.9
+        }) &&
+        STATIONS.every(({ id }) => {
+          const { card, below } = machine.callouts[id]
+          const y = card.clone().project(camera).y
+          return below ? y >= -0.6 : y <= 0.36
+        })
       if (fits) far = d
       else near = d
     }
     return far
   }
   const goHome = () => {
-    controls.target.copy(HOME_TARGET)
-    camera.position.copy(HOME_TARGET).addScaledVector(HOME_DIRECTION, homeDistance())
-    camera.lookAt(HOME_TARGET)
+    // Measured first: the search moves the camera itself
+    const distance = homeDistance()
+    controls.target.copy(homeTarget)
+    camera.position.copy(homeTarget).addScaledVector(HOME_DIRECTION, distance)
+    camera.lookAt(homeTarget)
   }
 
   let state: TwinState = { tones: new Map(), stations: { bottom: 'nodata', vertical: 'nodata', dosing: 'nodata', top: 'nodata' }, line: null, running: false, selected: null, hovered: null }
@@ -285,7 +317,16 @@ export function createTwinScene(host: HTMLElement, events: { hover(channel: stri
       part.material.emissive.copy(color)
       part.material.emissiveIntensity = { critical: 0.6 + 0.9 * pulse, warning: 0.85, normal: 0.42, nodata: 0.05, brand: 0.4 }[tone]
       part.halo.color.copy(color)
-      part.halo.opacity = { critical: 0.3 + 0.55 * pulse, warning: 0.5, normal: 0.16, nodata: 0, brand: 0.3 }[tone]
+      // A Warning or a Critical glows through whatever stands in front of it (the rear jaws sit behind the
+      // pouches), blended so its colour shows on white film too, where added light would only turn white
+      const alarm = tone === 'warning' || tone === 'critical'
+      part.halo.depthTest = !alarm
+      part.halo.blending = alarm ? NormalBlending : AdditiveBlending
+      part.ring.color.copy(color)
+      part.ring.opacity = tone === 'critical' ? 0.65 + 0.35 * pulse : tone === 'warning' ? 0.9 : 0
+      for (const sprite of part.rings) sprite.scale.setScalar((sprite.userData.size as number) * (tone === 'critical' ? 1 + 0.4 * (1 - pulse) : 1))
+      part.halo.opacity = { critical: 0.7 + 0.3 * pulse, warning: 0.65, normal: 0.2, nodata: 0, brand: 0.3 }[tone]
+      for (const sprite of part.glows) sprite.scale.setScalar((sprite.userData.size as number) * (tone === 'critical' ? 1.2 + 0.5 * pulse : 1))
       const selected = state.selected === channel
       if (selected) part.halo.opacity = Math.max(part.halo.opacity, 0.45)
       for (const outline of part.outlines) {
@@ -347,26 +388,42 @@ export function createTwinScene(host: HTMLElement, events: { hover(channel: stri
   resize()
   frame = requestAnimationFrame(tick)
 
+  const fly = (to: Vector3, toTarget: Vector3) => {
+    dirty = true
+    if (reducedMotion.matches) {
+      camera.position.copy(to)
+      controls.target.copy(toTarget)
+      return
+    }
+    flight = { from: camera.position.clone(), fromTarget: controls.target.clone(), to, toTarget, start: performance.now() }
+  }
+  const flyHome = () => {
+    userMoved = false
+    const from = camera.position.clone()
+    const fromTarget = controls.target.clone()
+    goHome()
+    const to = camera.position.clone()
+    camera.position.copy(from)
+    controls.target.copy(fromTarget)
+    fly(to, homeTarget.clone())
+  }
+
   return {
     cards,
     update(next) {
       state = next
       dirty = true
     },
-    resetView() {
-      userMoved = false
-      const from = camera.position.clone()
-      const fromTarget = controls.target.clone()
-      goHome()
-      const to = camera.position.clone()
-      if (reducedMotion.matches) {
-        dirty = true
-        return
-      }
-      camera.position.copy(from)
-      controls.target.copy(fromTarget)
-      flight = { from, fromTarget, to, toTarget: HOME_TARGET.clone(), start: performance.now() }
+    focus(channel) {
+      const mesh = channel ? machine.pickables.find((m) => m.userData.channel === channel) : undefined
+      if (!mesh) return flyHome()
+      userMoved = true
+      const point = mesh.getWorldPosition(new Vector3())
+      // From the side the camera is on, but low: the stations sit under the deck, behind the front guards
+      const direction = camera.position.clone().sub(controls.target).setY(0).normalize().setY(0.22).normalize()
+      fly(point.clone().addScaledVector(direction, machine.focusDistance), point)
     },
+    resetView: flyHome,
     dispose() {
       cancelAnimationFrame(frame)
       resizer.disconnect()
@@ -391,6 +448,7 @@ export function createTwinScene(host: HTMLElement, events: { hover(channel: stri
       outlineHover.dispose()
       outlineSelected.dispose()
       glow.dispose()
+      ring.dispose()
       environment.dispose()
       pmrem.dispose()
       renderer.dispose()

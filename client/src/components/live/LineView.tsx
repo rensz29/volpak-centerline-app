@@ -134,7 +134,7 @@ export function LineView({ view, now, onOpenEvent }: { view: LiveView; now: numb
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="text-nav-fg-strong text-[15px] leading-tight font-semibold">Line view · Volpak filler</h2>
-          <p className="text-[12px]">The machine in 3D after its general arrangement (SI-360 F3): schematic, not to scale</p>
+          <p className="text-[12px]">The machine in 3D, modelled after its general arrangement (SI-360 F3)</p>
         </div>
         <div className="flex items-center gap-2">
           {showModel && (

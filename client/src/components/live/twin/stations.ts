@@ -106,15 +106,20 @@ export function twinZones(parameters: LiveParameter[]): TwinZone[] {
   )
 }
 
-/** "Vertical seals: 1 Critical, 2 Warnings", or "all Normal" */
+const PLURAL: Record<string, string> = { Critical: 'Criticals', Warning: 'Warnings', 'HMI mismatch': 'HMI mismatches' }
+
+/** "1 Critical · 1 HMI off target · 1 monitoring off", worst first, or "all 6 Normal" */
 export function stationSummary(zones: TwinZone[]): string {
   if (zones.length === 0) return 'No zones'
-  const count = (tone: Tone) => zones.filter((z) => z.look.tone === tone).length
-  const parts = [
-    [count('critical'), 'Critical', 'Criticals'],
-    [count('warning'), 'Warning', 'Warnings'],
-    [count('nodata'), 'not judged', 'not judged'],
-  ] as const
-  const named = parts.filter(([n]) => n > 0).map(([n, one, many]) => `${n} ${n === 1 ? one : many}`)
-  return named.length ? named.join(' · ') : `${zones.length === 1 ? 'Normal' : `all ${zones.length} Normal`}`
+  const counts = new Map<string, { n: number; rank: number }>()
+  for (const { look } of zones) {
+    if (look.tone === 'normal') continue
+    const seen = counts.get(look.label)
+    counts.set(look.label, { n: (seen?.n ?? 0) + 1, rank: RANK[look.tone] })
+  }
+  if (counts.size === 0) return zones.length === 1 ? 'Normal' : `all ${zones.length} Normal`
+  return [...counts]
+    .sort(([, a], [, b]) => b.rank - a.rank)
+    .map(([label, { n }]) => `${n} ${n > 1 && PLURAL[label] ? PLURAL[label] : label in PLURAL || /^[A-Z]{2}/.test(label) ? label : label.toLowerCase()}`)
+    .join(' · ')
 }
