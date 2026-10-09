@@ -11,7 +11,6 @@
 #   images/*.tar.gz     every image the stack runs (docker save); manifest.json has each one's layers' digests, which
 #                       identify it on any engine (an image's id depends on the engine's image store)
 #   clamav-db.tar.gz    ClamAV's signatures as of the kit's day, so uploads are scanned offline (O-24)
-#   ollama.tar          the AI models Ollama holds (ADR-0041, ADR-0048), when it has them: pulling them needs the internet
 #   centerline.bundle   the repository at the kit's commit (git bundle): clone it for the code and these scripts
 #   RESTORE.md          the steps on a new PC; manifest.json; SHA256SUMS
 #
@@ -64,10 +63,6 @@ make_kit() {
   done
   say "saving ClamAV's signatures"
   docker run --rm -v "${project}_clamav-db:/db:ro" pgvector/pgvector:pg17 tar czf - -C /db . > "$work/clamav-db.tar.gz"
-  if [[ -n "$(docker run --rm -v "${project}_ollama:/m:ro" pgvector/pgvector:pg17 ls -A /m 2>/dev/null)" ]]; then
-    say "saving the AI model (already compressed: tar only)"
-    docker run --rm -v "${project}_ollama:/m:ro" pgvector/pgvector:pg17 tar cf - -C /m . > "$work/ollama.tar"
-  fi
   say "bundling the repository at $commit"
   git -C "$repo" bundle create "$work/centerline.bundle" HEAD "$(git -C "$repo" branch --show-current)" 2>/dev/null
   cp "$repo/deploy/kit-restore.md" "$work/RESTORE.md"
@@ -143,12 +138,6 @@ sys.exit(0 if json.load(sys.stdin) == kit['layers'] else 1)" "$kit/manifest.json
     docker volume create "$volume" >/dev/null
     docker run --rm -i -v "$volume:/db" pgvector/pgvector:pg17 tar xzf - -C /db < "$kit/clamav-db.tar.gz"
     say "ClamAV's signatures loaded into $volume (as of the kit's day)"
-  fi
-  if [[ -f "$kit/ollama.tar" ]]; then
-    volume="${project}_ollama"
-    docker volume create "$volume" >/dev/null
-    docker run --rm -i -v "$volume:/m" pgvector/pgvector:pg17 tar xf - -C /m < "$kit/ollama.tar"
-    say "the AI model loaded into $volume"
   fi
   say "done. Next: deploy/restore.sh <a backup set>, deploy/setup.sh, then deploy/compose.sh up -d (never --build offline): RESTORE.md"
 }

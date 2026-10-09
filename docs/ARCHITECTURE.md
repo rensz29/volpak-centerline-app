@@ -207,10 +207,9 @@ broker is an input only; Centerline services never talk to each other through it
 | B. WSL2 + Docker Engine via boot task | Workable, soak test needed | Only with Win 11 mirrored networking (verify) | Yes (CUDA) | Fallback |
 | Docker Desktop | **No** — needs interactive login (breaks DEP-05); paid licence | — | — | **Rejected** |
 
-Ollama stays its own container in the stack, on the server as on the owner's laptop
-([ADR-0049](decisions/ADR-0049-production-runs-the-laptops-stack.md)): the host must give Docker the NVIDIA GPU (Linux with
-the NVIDIA Container Toolkit, WSL2, or a VM with the GPU passed through), and `deploy/compose.sh` adds the GPU file from
-`deploy/.env`. Ollama isn't installed on the Windows host.
+Ollama is another container, provided apart from Centerline's stack: the api asks the one `CENTERLINE_OLLAMA_URL` in
+`deploy/.env` names ([ADR-0050](decisions/ADR-0050-ollama-outside-the-stack.md)), and the GPU is wherever it runs
+(`deploy/ollama/` runs one where none does). Centerline's host needs no GPU, and Ollama isn't installed on the Windows host.
 
 ---
 

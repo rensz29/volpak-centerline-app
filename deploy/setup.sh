@@ -55,8 +55,9 @@ db = {"host": "postgres", "port": 5432, "dbname": "centerline"}
 app = {**db, "user": "centerline_app", "password_file": "secrets/postgres-app-password"}
 timebase = {"base_url": "http://10.156.116.179:4516", "dataset": "dressings", "timeout_s": 60, "auth": {"type": "none"}}
 SCANNER = {"type": "clamd", "host": "clamav", "port": 3310, "timeout_s": 60}  # the clamav container (ADR-0031)
-# The ollama container (ADR-0041); the model is pulled once (deploy/README.md), then pinned by its digest
-AI = {"enabled": True, "url": "http://ollama:11434", "model": "qwen3.5:4b", "model_digest": None, "timeout_s": 30, "num_ctx": 4096, "warm_every_s": 60, "open_every_s": 2, "summary_every_s": 2, "embed_model": "bge-m3", "embed_model_digest": None, "embed_every_s": 10, "translate_every_s": 20, "translate_timeout_s": 180}
+# The AI (ADR-0041, ADR-0050): an Ollama outside this stack, named in deploy/.env; its models pinned by digest
+AI = {"enabled": True, "url": "",  # the Ollama is CENTERLINE_OLLAMA_URL in deploy/.env (ADR-0050)
+      "model": "qwen3.5:4b", "model_digest": None, "timeout_s": 30, "num_ctx": 4096, "warm_every_s": 60, "open_every_s": 2, "summary_every_s": 2, "embed_model": "bge-m3", "embed_model_digest": None, "embed_every_s": 10, "translate_every_s": 20, "translate_timeout_s": 180}
 if os.path.exists(dev):
     timebase = json.load(open(dev, encoding="utf-8")).get("timebase") or timebase
 files = {
@@ -152,23 +153,22 @@ ENV
   echo "added    the backup settings to deploy/.env (no off-host folder yet)"
 fi
 
-# The AI on the GPU and the simulator (ADR-0049), added once: deploy/compose.sh reads them
-if ! grep -q '^CENTERLINE_GPU=' "$repo/deploy/.env"; then
-  gpu=none
-  # Docker reaches an NVIDIA GPU when a container given one can list it (with an image already here: nothing pulled)
-  if docker image inspect pgvector/pgvector:pg17 >/dev/null 2>&1 \
-     && docker run --rm --pull never --gpus all pgvector/pgvector:pg17 nvidia-smi -L >/dev/null 2>&1; then
-    gpu=nvidia
-  fi
-  cat >> "$repo/deploy/.env" <<ENV
+# The Ollama to ask, and the simulator (ADR-0049, ADR-0050), added once
+if ! grep -q '^CENTERLINE_OLLAMA_URL=' "$repo/deploy/.env"; then
+  cat >> "$repo/deploy/.env" <<'ENV'
 
-# The AI model on the GPU (ADR-0049): nvidia when Docker reaches an NVIDIA GPU (setup.sh checks), none for the CPU
-# (slower: the AI's answers may miss their 30 s). deploy/compose.sh adds deploy/compose.gpu.yaml for nvidia.
-CENTERLINE_GPU=$gpu
+# The Ollama the AI asks (ADR-0050): its own container, here or on another machine, not part of this stack.
+# On this machine: http://host.docker.internal:11434 (deploy/ollama/ runs one). On another: http://<its address>:11434.
+# Empty: no AI, and operators get the fixed questions. After a change: deploy/compose.sh up -d api
+CENTERLINE_OLLAMA_URL=
+ENV
+  echo "added    CENTERLINE_OLLAMA_URL to deploy/.env: put your Ollama's URL there"
+fi
+if ! grep -q '^CENTERLINE_SIMULATOR=' "$repo/deploy/.env"; then
+  cat >> "$repo/deploy/.env" <<'ENV'
 # The simulated line (deploy/compose.sim.yaml): on only away from the plant, never on the line
 CENTERLINE_SIMULATOR=off
 ENV
-  echo "added    CENTERLINE_GPU=$gpu and CENTERLINE_SIMULATOR=off to deploy/.env"
 fi
 
 echo "deploy/config is ready. Next: deploy/compose.sh up -d --build (see deploy/README.md)"

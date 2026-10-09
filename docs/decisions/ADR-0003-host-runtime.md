@@ -40,9 +40,9 @@ fixed, switch to option B and re-run the test with a week-long soak.
 
 - GPU access for Ollama inside a Hyper-V VM is limited. ~~If the O-01 model needs a
   GPU, run Ollama on the Windows host, reachable only from the VM, and record a
-  DEP-01 deviation.~~ Since [ADR-0049](ADR-0049-production-runs-the-laptops-stack.md), Ollama stays its own
-  container in the stack: the host must give Docker the GPU (a VM only with the GPU passed through), and the host test
-  checks it: `docker run --rm --gpus all pgvector/pgvector:pg17 nvidia-smi -L` lists the GPU. (The dev laptop's RTX A500 has 4 GB VRAM. That's enough to
+  DEP-01 deviation.~~ Since [ADR-0050](ADR-0050-ollama-outside-the-stack.md), Ollama is another container,
+  provided apart from Centerline and named by URL in `deploy/.env`: the GPU is wherever that Ollama runs, and this
+  host needs none. (The dev laptop's RTX A500 has 4 GB VRAM. That's enough to
   benchmark small models, not to size production.)
 - The Windows host must be Windows 11 Pro/Enterprise or LTSC; Windows 10 is out
   of support.

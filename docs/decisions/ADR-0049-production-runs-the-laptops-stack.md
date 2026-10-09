@@ -1,6 +1,8 @@
 # ADR-0049: Production runs this laptop's stack: Ollama in its own container, on the GPU
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by [ADR-0050](ADR-0050-ollama-outside-the-stack.md) the same day: Ollama isn't part of
+  the stack but another container, named by `CENTERLINE_OLLAMA_URL` in `deploy/.env`; `deploy/compose.sh` has no GPU
+  setting any more, and the kit carries no models
 - **Date:** 2026-10-09
 - **Decider:** Szyrelle (system owner), on 2026-10-09: "imagine this my loptop is a production so my ollama is totally
   installed on the different container so thats the production setup so i want you to prefere on this once this

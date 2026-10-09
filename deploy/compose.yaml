@@ -1,8 +1,9 @@
-# Centerline on one Docker host (SDD §3, ADR-0030): the seven containers built so far. The plan's others come
-# with their phases: ai-worker and ollama (Phase 3, after O-01/G0c).
+# Centerline on one Docker host (SDD §3, ADR-0030): seven containers. The local AI isn't one of them: the api asks
+# the Ollama that deploy/.env's CENTERLINE_OLLAMA_URL names, a container of its own, here or on another machine
+# (ADR-0050; deploy/ollama/ runs one where none does yet).
 #
-#   deploy/setup.sh                                      # once: this host's settings in deploy/config
-#   docker compose -f deploy/compose.yaml up -d --build  # then http://localhost:6040 (https:// with CENTERLINE_SCHEME=https)
+#   deploy/setup.sh                 # once: this host's settings in deploy/config, and deploy/.env
+#   deploy/compose.sh up -d --build # then http://localhost:6040 (https:// with CENTERLINE_SCHEME=https)
 #
 # It judges the real machine on the plant broker and reads the real Timebase, as the control-room PC will, on its
 # own database. Everything it writes is permanent. One monitor-core judges the line at a time: stop the development
@@ -53,6 +54,9 @@ services:
     environment:
       CENTERLINE_API_CONFIG: /app/config/api.json
       CENTERLINE_SCHEME: ${CENTERLINE_SCHEME:-http}  # over plain HTTP the session cookie can't be Secure (ADR-0032)
+      CENTERLINE_OLLAMA_URL: ${CENTERLINE_OLLAMA_URL:-}  # the Ollama to ask (ADR-0050): deploy/.env; empty, api.json's ai.url
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # an Ollama published on this host, on Linux as on Docker Desktop
     volumes:
       - ./config:/app/config  # it saves the connections, the register's export and the query log here
       - ${CENTERLINE_BACKUP_DIR:-./backups}:/app/backups:ro  # the backup agent's status.json, for the health page (ADR-0038)
@@ -111,22 +115,6 @@ services:
     # Its own healthcheck (clamdcheck.sh). The first start downloads the signatures and loads them in a few minutes;
     # meanwhile uploads are refused with "the malware scanner isn't answering". Nothing waits for it.
 
-  ollama:  # the local language model for the follow-up questions (AI-01, ADR-0041): nothing leaves this PC
-    image: ollama/ollama:${CENTERLINE_OLLAMA_TAG:-0.40.1}  # pinned: the version tested here
-    logging: *logging
-    volumes:
-      - ollama:/root/.ollama  # the models, pulled once (deploy/README.md, "The AI model"), kept between restarts
-    environment:
-      OLLAMA_KEEP_ALIVE: "24h"  # the model stays loaded, so the first question of a shift isn't slowed by loading it
-      OLLAMA_NUM_PARALLEL: "1"  # one line, one question at a time
-      OLLAMA_MAX_LOADED_MODELS: "2"  # the chat model on the GPU and the embedding model on the CPU (ADR-0048), both kept loaded
-      OLLAMA_CONTEXT_LENGTH: "4096"  # as the api asks: a change would reload the model
-      OLLAMA_NO_CLOUD: "true"  # Ollama's cloud models off: everything runs on this PC (AI-01)
-    restart: unless-stopped
-    networks: [centerline]  # not published: only the api reaches it, as ollama:11434
-    # On the CPU here; deploy/compose.gpu.yaml gives it an NVIDIA GPU. Without it, or slow, operators get the fixed
-    # questions: nothing waits for it.
-
   proxy:
     image: centerline-web:latest
     logging: *logging
@@ -156,7 +144,6 @@ volumes:
   clamav-db:
   caddy-data:
   caddy-config:
-  ollama:
 
 secrets:
   postgres-password:

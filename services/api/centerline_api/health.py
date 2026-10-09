@@ -250,8 +250,12 @@ def _chat_model(a: dict | None) -> list[dict]:
     if not a or not a.get("enabled"):
         return [check("ai", area, title, "unknown", "Off: operators get the fixed follow-up questions")]
     model = a.get("model")
+    if not a.get("url"):
+        return [check("ai", area, title, "warning", "No Ollama to ask, so the fixed questions are asked: put its URL in deploy/.env "
+                                                    "(CENTERLINE_OLLAMA_URL), then deploy/compose.sh up -d api")]
     if not a.get("reachable"):
-        return [check("ai", area, title, "warning", f"Ollama isn't answering, so the fixed questions are asked ({a.get('error')})")]
+        return [check("ai", area, title, "warning", f"Ollama at {a['url']} isn't answering, so the fixed questions are asked "
+                                                    f"({a.get('error')})")]
     if not a.get("digest"):
         return [check("ai", area, title, "warning", f"{model} isn't on this PC, so the fixed questions are asked: pull it into Ollama")]
     if a.get("pinned") and a["digest"].removeprefix("sha256:") != a["pinned"].removeprefix("sha256:"):
@@ -263,8 +267,8 @@ def _chat_model(a: dict | None) -> list[dict]:
     timing = f"; its last questions took {last['latencyMs'] / 1000:.1f} s" if last and last.get("latencyMs") is not None else ""
     gpu = a.get("gpu")
     if gpu == 0:  # loaded, none of it on the GPU: Docker didn't reach one (ADR-0049)
-        return [check("ai", area, title, "warning", f"{model} runs on the CPU only, so its answers are slower{timing}: give Ollama "
-                                                    "the GPU (CENTERLINE_GPU=nvidia in deploy/.env, then deploy/compose.sh up -d ollama)")]
+        return [check("ai", area, title, "warning", f"{model} runs on the CPU only, so its answers are slower{timing}: give "
+                                                    "Ollama a GPU where it runs (deploy/ollama/compose.gpu.yaml)")]
     where = f" on the GPU ({gpu:.0%} of it)" if gpu else ""
     return [check("ai", area, title, "ok", f"{model} ready{where}{timing}")]
 

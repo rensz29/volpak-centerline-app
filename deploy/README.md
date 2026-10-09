@@ -15,7 +15,9 @@ Timebase**, on a database of its own. **Everything it writes is permanent**, as 
 | `backup` | The backup agent ([ADR-0035](../docs/decisions/ADR-0035-backups-pg-dump.md)): a set every hour in `deploy/backups`, kept 48 hours, then the newest of each of 30 days and 12 months; the first set of each day is restored into a scratch database and checked; off-host copies once `deploy/.env` names a folder |
 | `clamav` | ClamAV's clamd: the api sends it every uploaded OCAP and guidance file before keeping it ([ADR-0031](../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)). Its signatures are in the `centerline_clamav-db` volume, and it updates them itself while it has the internet. Not published |
 
-The plan's other two containers come with Phase 3: ai-worker and ollama, once the AI model is chosen (O-01).
+The local AI, Ollama, isn't one of them: the api asks the Ollama that `CENTERLINE_OLLAMA_URL` in `deploy/.env` names,
+another container, here or on another machine ([ADR-0050](../docs/decisions/ADR-0050-ollama-outside-the-stack.md);
+[The AI model](#the-ai-model) below).
 
 **clamav** takes about 1 GB of memory once its signatures are loaded, which takes a minute or two after a start.
 Until it answers, uploads are refused ("the malware scanner isn't answering") and nothing else waits for it.
@@ -29,11 +31,10 @@ deploy/setup.sh                                       # once: deploy/config, see
 deploy/compose.sh up -d --build
 ```
 
-**`deploy/compose.sh`** is `docker compose -f deploy/compose.yaml` plus what this PC runs, from `deploy/.env`
-([ADR-0049](../docs/decisions/ADR-0049-production-runs-the-laptops-stack.md)): `deploy/compose.gpu.yaml` when
-`CENTERLINE_GPU=nvidia` (Ollama on the GPU), `deploy/compose.sim.yaml` when `CENTERLINE_SIMULATOR=on` (away from the
-plant only). Use it for every command, so a restart never brings Ollama back without its GPU. The commands below
-written as `docker compose -f deploy/compose.yaml …` work the same through it.
+**`deploy/compose.sh`** is `docker compose -f deploy/compose.yaml`, plus `deploy/compose.sim.yaml` when `deploy/.env`
+has `CENTERLINE_SIMULATOR=on` (away from the plant only) ([ADR-0049](../docs/decisions/ADR-0049-production-runs-the-laptops-stack.md)).
+Use it for every command, so nothing brings the simulator onto the line. The commands below written as
+`docker compose -f deploy/compose.yaml …` work the same through it.
 
 - **`deploy/config`** (git-ignored, 0700) is this host's settings and secrets, mounted at `/app/config`. It holds
   the three services' settings (`api.json`, `monitor-core.json`, `notifier.json`) and the connections the
@@ -48,7 +49,7 @@ written as `docker compose -f deploy/compose.yaml …` work the same through it.
     certificate.
   - `CENTERLINE_BIND` and `CENTERLINE_PORT`: the address and port (127.0.0.1:6040 here).
   - `CENTERLINE_UID`: the owner of `deploy/config`.
-  - `CENTERLINE_GPU`: `nvidia` when Docker reaches an NVIDIA GPU (`setup.sh` checks once), else `none`.
+  - `CENTERLINE_OLLAMA_URL`: the Ollama the AI asks ([ADR-0050](../docs/decisions/ADR-0050-ollama-outside-the-stack.md)); empty, no AI.
   - `CENTERLINE_SIMULATOR`: `on` only away from the plant; `off` on the line.
   To set it up on another machine, see [the README's deployment guide](../README.md#deploy-on-another-machine).
 
@@ -130,22 +131,37 @@ deploy/compose.sh exec backup python -m centerline_backup now   # a backup set n
 
 ## The AI model
 
-The `ollama` container answers the api only ([ADR-0041](../docs/decisions/ADR-0041-local-ai-follow-up-questions.md)). It needs its model once, from the internet
-(about 3.3 GB), then keeps it in its volume; the offline kit carries it to a PC without the internet:
+The api asks an Ollama outside this stack: the one `CENTERLINE_OLLAMA_URL` in `deploy/.env` names
+([ADR-0050](../docs/decisions/ADR-0050-ollama-outside-the-stack.md)), over `ai.url` in `deploy/config/api.json`. After a
+change: `deploy/compose.sh up -d api`. On another machine: `http://<its address>:11434`; on this one:
+`http://host.docker.internal:<port>` (the api resolves it to this host, on Linux too).
+
+That Ollama needs the models `qwen3.5:4b` (3.3 GB) and `bge-m3` (1.2 GB, the OCAP search by meaning, ADR-0048), with
+`OLLAMA_CONTEXT_LENGTH=4096`, `OLLAMA_MAX_LOADED_MODELS=2`, `OLLAMA_KEEP_ALIVE=24h`, `OLLAMA_NUM_PARALLEL=1` and
+`OLLAMA_NO_CLOUD=true`, a GPU, and a port only Centerline reaches (Ollama has no password). **`deploy/ollama/`** runs one
+with those settings, as its own Compose project (`ollama`), where none runs yet:
 
 ```bash
-docker compose -f deploy/compose.yaml exec ollama ollama pull qwen3.5:4b
-docker compose -f deploy/compose.yaml exec ollama ollama pull bge-m3      # the OCAP search by meaning (ADR-0048), 1.2 GB
-docker compose -f deploy/compose.yaml exec ollama ollama list          # their digests, for model_digest and embed_model_digest in api.json
+docker compose -f deploy/ollama/compose.yaml -f deploy/ollama/compose.gpu.yaml up -d   # the GPU file: an NVIDIA GPU
+docker compose -f deploy/ollama/compose.yaml exec ollama ollama pull qwen3.5:4b
+docker compose -f deploy/ollama/compose.yaml exec ollama ollama pull bge-m3
 ```
 
-- **On the GPU** ([ADR-0049](../docs/decisions/ADR-0049-production-runs-the-laptops-stack.md)): Ollama is its own container in the
-  stack, here and on the server; with `CENTERLINE_GPU=nvidia`, `deploy/compose.sh` gives it the NVIDIA GPU. Docker must
-  reach the GPU: on Linux the NVIDIA driver and the NVIDIA Container Toolkit, on Windows WSL2 with the NVIDIA driver.
-  Check: `docker run --rm --gpus all pgvector/pgvector:pg17 nvidia-smi -L` lists it. System health says how much of the
-  model is on the GPU, and warns when none of it is.
-- **Pinned:** `ai.model_digest` in `deploy/config/api.json` is the digest `ollama list` shows (or the full one from
-  `/api/tags`); a model with another digest isn't used. After changing it: `docker compose -f deploy/compose.yaml restart api`.
+`deploy/ollama/.env` (git-ignored) says where it listens: `OLLAMA_BIND` (127.0.0.1 by default; 172.17.0.1, the Docker
+bridge, on Linux) and `OLLAMA_PORT` (11434), and `OLLAMA_VOLUME`, the models' volume. The owner's laptop runs it on
+127.0.0.1:11435 with the models of the stack's earlier `centerline_ollama` volume.
+
+The full digests, for `ai.model_digest` and `ai.embed_model_digest` in `deploy/config/api.json`:
+
+```bash
+deploy/compose.sh exec api python -c "import json, os, urllib.request; [print(m['name'], m['digest']) for m in json.load(urllib.request.urlopen(os.environ['CENTERLINE_OLLAMA_URL'] + '/api/tags'))['models']]"
+```
+
+- **On the GPU:** the Ollama's own. Docker reaches the GPU on Linux with the NVIDIA driver and the NVIDIA Container
+  Toolkit, on Windows through WSL2 with the NVIDIA driver. System health says how much of the model is on the GPU, and
+  warns when none of it is, when Ollama isn't answering, and when no URL is set.
+- **Pinned:** a model whose digest isn't the pinned one isn't used (`ollama list` shows only the first 12 characters).
+  After changing them: `deploy/compose.sh restart api`.
 - **Kept warm:** `ai.warm_every_s` (60) has the api reload the model after a restart, so a first question doesn't wait
   for it to load (over a minute on a 4 GB GPU).
 - **Opening questions:** `ai.open_every_s` (2) has the api write each new request's first question from the OCAP

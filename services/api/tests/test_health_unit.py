@@ -33,7 +33,8 @@ def healthy() -> dict:
         "database": {"reachable": True, "auditChain": "intact", "size": "12 MB"},
         "scanner": {"type": "clamd", "version": "ClamAV 1.4.3/27785/Tue Oct  6 08:23:45 2026"},
         "timebase": {"reachable": True, "latencyMs": 120},
-        "ai": {"enabled": True, "model": "qwen3.5:4b", "pinned": None, "reachable": True, "digest": "sha256:abc", "gpu": 0.56,
+        "ai": {"enabled": True, "model": "qwen3.5:4b", "url": "http://host.docker.internal:11434", "pinned": None, "reachable": True,
+               "digest": "sha256:abc", "gpu": 0.56,
                "last": {"outcome": "used", "detail": None, "latencyMs": 2400, "at": ago(minutes=8)},
                "embed": {"model": "bge-m3", "pinned": None, "digest": "sha256:e3b", "total": 20, "done": 20}},
     }
@@ -138,6 +139,7 @@ def test_the_worst_state_wins():
 def test_the_ai_model_off_down_missing_unpinned_or_unused_only_warns():
     assert by_id(grade(healthy(), NOW))["ai"]["summary"] == "qwen3.5:4b ready on the GPU (56% of it); its last questions took 2.4 s"
     for change, state, words in (({"enabled": False}, "unknown", "fixed follow-up questions"),
+                                 ({"url": ""}, "warning", "No Ollama to ask"),  # deploy/.env names none (ADR-0050)
                                  ({"reachable": False, "error": "connection refused"}, "warning", "isn't answering"),
                                  ({"digest": None}, "warning", "isn't on this PC"),
                                  ({"pinned": "sha256:def"}, "warning", "isn't the pinned one"),

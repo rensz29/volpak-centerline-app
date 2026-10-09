@@ -8,9 +8,6 @@ Write down the time you start.
 
 1. **Docker and git.** Install Docker Engine with the Compose plugin, and git, from IT's offline packages. Check:
    `docker version` and `docker compose version`.
-   - **With an NVIDIA GPU** (the AI runs on it, ADR-0049): its driver and, on Linux, the NVIDIA Container Toolkit,
-     from IT's offline packages too. After step 3, `docker run --rm --gpus all pgvector/pgvector:pg17 nvidia-smi -L`
-     must list the GPU.
 2. **The code.** Clone the kit's repository and go into it:
    ```bash
    git clone <kit>/centerline.bundle centerline
@@ -28,8 +25,8 @@ Write down the time you start.
    With no `deploy/config` on this PC, it takes the settings from the set. It restores the database, checks the audit
    chain, and starts nothing else.
 5. **This PC's address.** In `deploy/.env`, set `CENTERLINE_BIND`, `CENTERLINE_PORT` and, for HTTPS, `CENTERLINE_SITE`.
-   Then run `deploy/setup.sh`, which only adds what's missing. It checks whether Docker reaches an NVIDIA GPU and
-   writes `CENTERLINE_GPU` (`nvidia` or `none`); `CENTERLINE_SIMULATOR` must stay `off`.
+   Then run `deploy/setup.sh`, which only adds what's missing. In `deploy/.env`, `CENTERLINE_OLLAMA_URL` names the
+   Ollama the AI asks (ADR-0050: it isn't part of this kit), and `CENTERLINE_SIMULATOR` stays `off`.
 6. **Start it,** without `--build` (building needs the internet):
    ```bash
    deploy/compose.sh up -d
@@ -38,8 +35,8 @@ Write down the time you start.
    - **If the old PC might still be judging the line,** stop it there first. Two monitor-cores mean two judges and
      two histories.
    - **For a drill,** stop this monitor-core at once: `deploy/compose.sh stop monitor-core`.
-7. **Check.** Sign in, and open Digital Centerline and Alarms. On System health, the AI model should say it's on the
-   GPU (a minute after the start, once it's loaded). Write down the time.
+7. **Check.** Sign in, and open Digital Centerline and Alarms. On System health, the AI model should say it's ready,
+   on the GPU, once the Ollama has loaded it. Write down the time.
 
 Anything judged after the set's time is lost: at most an hour.
 

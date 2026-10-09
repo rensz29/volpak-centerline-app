@@ -1,0 +1,38 @@
+# An Ollama container for Centerline, run on its own (ADR-0050). Centerline's stack doesn't include Ollama: its api
+# asks the Ollama that CENTERLINE_OLLAMA_URL in deploy/.env names. Where none runs yet, this is one, with the settings
+# Centerline expects. Its own project, so it starts, stops and updates apart from Centerline:
+#
+#   docker compose -f deploy/ollama/compose.yaml -f deploy/ollama/compose.gpu.yaml up -d   # with an NVIDIA GPU
+#   docker compose -f deploy/ollama/compose.yaml up -d                                     # on the CPU (slower)
+#   docker compose -f deploy/ollama/compose.yaml exec ollama ollama pull qwen3.5:4b        # the models, once
+#
+# Then, in deploy/.env: CENTERLINE_OLLAMA_URL=http://host.docker.internal:11434 (on this machine).
+#
+# Ollama has no password: anyone who reaches its port can use it and delete its models. OLLAMA_BIND (in
+# deploy/ollama/.env) says where it listens: 127.0.0.1 (the default) on Docker Desktop, 172.17.0.1 (the Docker bridge)
+# on Linux, so Centerline's api reaches it and the LAN doesn't. For another machine's Centerline, its address, with
+# the firewall letting in only that machine.
+
+name: ollama
+
+services:
+  ollama:
+    image: ollama/ollama:${OLLAMA_TAG:-0.40.1}  # pinned: the version tested with Centerline
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+    ports:
+      - "${OLLAMA_BIND:-127.0.0.1}:${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - models:/root/.ollama  # the models, pulled once, kept between restarts
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"  # the model stays loaded, so the first question of a shift isn't slowed by loading it
+      OLLAMA_NUM_PARALLEL: "1"  # one line, one question at a time
+      OLLAMA_MAX_LOADED_MODELS: "2"  # the chat model on the GPU and the embedding model on the CPU (ADR-0048), both kept loaded
+      OLLAMA_CONTEXT_LENGTH: "4096"  # as Centerline asks: a change would reload the model
+      OLLAMA_NO_CLOUD: "true"  # Ollama's cloud models off: everything runs on premises (AI-01)
+    restart: unless-stopped
+
+volumes:
+  models:
+    name: ${OLLAMA_VOLUME:-ollama-models}  # an existing volume's name keeps its models (a stack's earlier one: centerline_ollama)

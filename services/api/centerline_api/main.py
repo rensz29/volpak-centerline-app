@@ -179,7 +179,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 backup = json.loads(settings.backup_status.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 backup = None
-        ai = {"enabled": settings.ai.enabled and bool(settings.ai.model), "model": settings.ai.model,
+        ai = {"enabled": settings.ai.enabled and bool(settings.ai.model), "model": settings.ai.model, "url": settings.ai.url,
               "pinned": settings.ai.model_digest,
               "last": None if last_ai is None else {"outcome": last_ai["outcome"], "detail": last_ai["detail"],
                                                     "latencyMs": last_ai["latency_ms"], "at": isotime.iso(last_ai["at"])}}

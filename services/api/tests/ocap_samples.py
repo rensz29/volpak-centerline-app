@@ -205,6 +205,9 @@ def xlsx(sheets: list[tuple[str, dict, list[str], bool]]) -> bytes:
 
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        def put(name: str, data: str) -> None:  # a fixed date: the same sheets make the same bytes, any second
+            z.writestr(zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0)), data, zipfile.ZIP_DEFLATED)
+
         for i, (_, cells, merged, _) in enumerate(sheets, start=1):
             rows: dict[int, list[str]] = {}
             for (r, c), v in sorted(cells.items()):
@@ -215,18 +218,18 @@ def xlsx(sheets: list[tuple[str, dict, list[str], bool]]) -> bytes:
                     rows.setdefault(r, []).append(f'<c r="{_col(c)}{r}"><v>{v}</v></c>')
             data = "".join(f'<row r="{r}">{"".join(cs)}</row>' for r, cs in sorted(rows.items()))
             merges = f'<mergeCells count="{len(merged)}">{"".join(f"<mergeCell ref=\"{m}\"/>" for m in merged)}</mergeCells>' if merged else ""
-            z.writestr(f"xl/worksheets/sheet{i}.xml", f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="{main}">'
+            put(f"xl/worksheets/sheet{i}.xml", f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="{main}">'
                                                        f"<sheetData>{data}</sheetData>{merges}</worksheet>")
-        z.writestr("xl/sharedStrings.xml", f'<?xml version="1.0" encoding="UTF-8"?><sst xmlns="{main}">'
+        put("xl/sharedStrings.xml", f'<?xml version="1.0" encoding="UTF-8"?><sst xmlns="{main}">'
                                            + "".join(f"<si><t>{esc(t)}</t></si>" for t in strings) + "</sst>")
-        z.writestr("xl/workbook.xml", f'<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="{main}" xmlns:r="{rel}"><sheets>'
+        put("xl/workbook.xml", f'<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="{main}" xmlns:r="{rel}"><sheets>'
                    + "".join(f'<sheet name="{esc(n)}" sheetId="{i}" r:id="rId{i}"{" state=\"hidden\"" if h else ""}/>'
                              for i, (n, _, _, h) in enumerate(sheets, start=1)) + "</sheets></workbook>")
-        z.writestr("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships '
+        put("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships '
                    'xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
                    + "".join(f'<Relationship Id="rId{i}" Type="{rel}/worksheet" Target="worksheets/sheet{i}.xml"/>'
                              for i in range(1, len(sheets) + 1)) + "</Relationships>")
-        z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types '
+        put("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types '
                    'xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" '
                    'ContentType="application/xml"/></Types>')
     return out.getvalue()

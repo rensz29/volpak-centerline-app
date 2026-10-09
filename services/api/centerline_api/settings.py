@@ -116,6 +116,14 @@ class Settings:
     backup_status: Path | None = None
 
 
+def _ai(raw: dict) -> AiSettings:
+    """The AI settings; the Ollama to ask is CENTERLINE_OLLAMA_URL when it's set (deploy/.env, ADR-0050), else ai.url."""
+    ai = {k: v for k, v in raw.items() if k in AiSettings.__dataclass_fields__}
+    if url := os.environ.get("CENTERLINE_OLLAMA_URL", "").strip():
+        ai["url"] = url
+    return AiSettings(**ai)
+
+
 def load_settings(path: str | Path | None = None) -> Settings:
     cfg_path = Path(path or os.environ.get("CENTERLINE_API_CONFIG") or API_DIR / "config.json").resolve()
     if not cfg_path.exists():
@@ -146,7 +154,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         analytics=analytics,
         auth=auth,
         scanner=ScannerSettings(**{k: v for k, v in (raw.get("scanner") or {}).items() if k in ScannerSettings.__dataclass_fields__}),
-        ai=AiSettings(**{k: v for k, v in (raw.get("ai") or {}).items() if k in AiSettings.__dataclass_fields__}),
+        ai=_ai(raw.get("ai") or {}),
         cors_origins=tuple(raw.get("cors_origins") or ()),
         audit_log=rel(raw.get("audit_log")),
         config_dir=rel(raw.get("config_dir")) or REPO / "config",
