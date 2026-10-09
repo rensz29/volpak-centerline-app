@@ -18,8 +18,8 @@ from datetime import datetime, timedelta, timezone
 from centerline_common.isotime import iso
 
 from .config import EngineConfig
-from .effects import (CancelTimer, Notify, OpenEvent, PauseEnded, PauseStarted, StartTimer, TimerDone, Transition,
-                      ZoneRef)
+from .effects import (BriefChange, CancelTimer, Notify, OpenEvent, PauseEnded, PauseStarted, StartTimer, TimerDone,
+                      Transition, ZoneRef)
 from .gate import RULES_INCOMPLETE, Gate, GateInputs
 from .machines import ActualMachine, HmiMachine, ZoneRule, text
 from .rules import decimal
@@ -76,6 +76,8 @@ class Engine:
         self.waiting: dict[str, datetime] = {}  # zone back on: judged again on values that arrived after this (MNT-02)
         self.overdue_sent: set = set()
         self.degraded: str | None = None  # the database away past the journal's limit (RES-01)
+        self.storage_degraded = False  # protected degraded mode (RES-02, O-12): brief changes aren't recorded
+        self.briefs_skipped = 0
         self.configure(cfg, now)
         self.gate.closed_since = now
         self._apply([PauseStarted("line", now, list(self.reasons))], now)
@@ -366,8 +368,15 @@ class Engine:
                 self._log(e)
                 if not e.open:
                     self.zone_of.pop(e.event_id, None)
+            if isinstance(e, BriefChange) and self.storage_degraded:
+                self.briefs_skipped += 1  # a lightweight record, not evidence: dropped while storage is full (O-12)
+                continue
             out.append(e)
         self.store.apply(out, now)
+
+    def emit(self, fx: list, now: datetime) -> None:
+        """Effects from outside the rules, such as the storage guard's alerts."""
+        self._apply(fx, now)
 
     def _payload_clock(self, ch: str | None) -> dict:
         """Each of a zone's areas → the _timestamp of its latest message, as the machine stamped it (invariant 13)."""

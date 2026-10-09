@@ -18,8 +18,10 @@ export function OcapOffers({ offers, busy, onChoose }: {
   return (
     <div className="flex flex-col gap-2">
       <p className="text-ink-soft">
-        {offers.length === 1 ? 'This OCAP section matches' : `These ${offers.length} OCAP sections match`} your reason, best first.
-        Read the one that fits in full, then choose it. If none fits, a Manager will guide you.
+        {offers[0]?.method === 'reason'
+          ? 'This is the OCAP row for the reason you picked. Read it in full, then choose it. If it doesn’t help, a Manager will guide you.'
+          : `${offers.length === 1 ? 'This OCAP section matches' : `These ${offers.length} OCAP sections match`} your reason, best first. ` +
+            'Read the one that fits in full, then choose it. If none fits, a Manager will guide you.'}
       </p>
       {offers.map((o) => {
         const reading = open === o.sectionId

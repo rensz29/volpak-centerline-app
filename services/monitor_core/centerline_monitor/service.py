@@ -14,15 +14,18 @@ import os
 import queue
 import socket
 import threading
+from collections import deque
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from centerline_common import roles
 from centerline_common.db import REPO, DatabaseConfig
+from centerline_common.isotime import iso
 
 from .engine import Engine
 from .mqtt import Subscriber, utcnow
+from .storage import StorageGuard
 from .store import FAILURES, Store
 
 log = logging.getLogger("centerline.monitor")
@@ -39,6 +42,8 @@ class MonitorSettings:
     ack_s: float = 2  # acknowledgments and monitoring control (switches, maintenance windows)
     journal_dir: Path = REPO / "data" / "journal"  # the disk journal (RES-01): a protected folder, 0700
     journal_limit_s: float = 1800  # RES-01's 30 min: past it, judging pauses and nothing is dropped
+    storage_s: float = 60  # how often the disks are measured (RES-02)
+    storage_paths: tuple[Path, ...] = ()  # disks to watch beside the journal's, such as the backups' (ADR-0036)
 
 
 def load_settings(path: str | Path | None = None) -> MonitorSettings:
@@ -53,7 +58,26 @@ def load_settings(path: str | Path | None = None) -> MonitorSettings:
         config_dir=(base / raw["config_dir"]).resolve() if raw.get("config_dir") else REPO / "config",
         instance=raw.get("instance") or socket.gethostname(),
         journal_dir=(base / raw["journal_dir"]).resolve() if raw.get("journal_dir") else REPO / "data" / "journal",
-        journal_limit_s=float(raw.get("journal_limit_s", 1800)))
+        journal_limit_s=float(raw.get("journal_limit_s", 1800)),
+        storage_paths=tuple((base / p).resolve() for p in raw.get("storage_paths") or ()))
+
+
+class Latency:
+    """How long each message waited from its arrival to the end of its judging, over the last minute: PER-01 gives
+    rule evaluation 2 s. The health page shows the longest (ADR-0038)."""
+
+    def __init__(self, window: timedelta = timedelta(minutes=1)):
+        self.window = window
+        self.samples: deque[tuple[datetime, float]] = deque()
+
+    def add(self, arrived: datetime, judged: datetime) -> None:
+        self.samples.append((judged, (judged - arrived).total_seconds() * 1000))
+
+    def status(self, now: datetime) -> dict:
+        while self.samples and now - self.samples[0][0] > self.window:
+            self.samples.popleft()
+        ms = [m for _, m in self.samples]
+        return {"maxMs": round(max(ms)) if ms else None, "messages": len(ms), "windowS": int(self.window.total_seconds())}
 
 
 class Service:
@@ -61,6 +85,8 @@ class Service:
         self.settings = settings
         self.store = Store(settings.database, settings.config_dir, settings.instance,
                            journal_path=settings.journal_dir / f"{settings.instance}.jsonl")
+        self.storage = StorageGuard([settings.journal_dir, *settings.storage_paths])
+        self.latency = Latency()
         self.inbox: queue.Queue = queue.Queue()
         self.subscriber: Subscriber | None = None
         self.stopping = threading.Event()
@@ -97,7 +123,7 @@ class Service:
         started = utcnow()
         self._subscribe(engine.cfg.broker)
         broker = engine.cfg.broker
-        next_beat = next_reload = next_ack = started
+        next_beat = next_reload = next_ack = next_storage = started
         try:
             while not self.stopping.is_set():
                 due = engine.next_due()
@@ -111,6 +137,15 @@ class Service:
                     pass
                 now = utcnow()
                 engine.tick(now)
+                if now >= next_storage:
+                    # Before anything that needs the database: the alerts wait in the journal if it's away
+                    next_storage = now + timedelta(seconds=self.settings.storage_s)
+                    alerts = self.storage.check(now)
+                    if self.storage.degraded != engine.storage_degraded:
+                        engine.storage_degraded = self.storage.degraded
+                        log.warning("storage %s%% full: protected degraded mode %s", self.storage.used_pct,
+                                    "begins" if self.storage.degraded else "ends")
+                    engine.emit(alerts, now)
                 try:
                     if now >= next_beat:
                         # First the journal and the limit, which need no database; each schedule moves on before
@@ -119,7 +154,10 @@ class Service:
                         self.store.drain(now)
                         engine.set_degraded(self._degraded(now), now)
                         if self.store.reachable(now):
-                            self.store.heartbeat(now, started, engine.status())
+                            self.store.heartbeat(now, started, {**engine.status(), "storage": {
+                                **self.storage.status(), "briefChangesSkipped": engine.briefs_skipped},
+                                "evaluation": self.latency.status(now),
+                                "journal": {"steps": self.store.journal.steps, "oldestAt": iso(self.store.journal.oldest)}})
                     if now >= next_ack and self.store.reachable(now):
                         next_ack = now + timedelta(seconds=self.settings.ack_s)
                         for ack in self.store.new_acks():
@@ -146,18 +184,18 @@ class Service:
 
     def _degraded(self, now) -> str | None:
         """Past the journal's limit nothing new is judged until the database is back: nothing is dropped
-        (RES-01; what else stops in protected degraded mode is O-12's, Phase 5)."""
+        (RES-01). A full disk is the storage guard's (RES-02, storage.py)."""
         age = self.store.journal.age_s(now) if self.store.journal.pending else 0.0
         if age <= self.settings.journal_limit_s:
             return None
         return (f"The database has been unreachable for {age / 60:.0f} min, longer than the journal's "
                 f"{self.settings.journal_limit_s / 60:.0f} min: judging is paused until it's back; everything so far is kept")
 
-    @staticmethod
-    def _dispatch(engine: Engine, item: tuple) -> None:
+    def _dispatch(self, engine: Engine, item: tuple) -> None:
         if item[0] == "message":
             _, topic, payload, retained, at = item
             engine.on_message(topic, payload, retained, at)
+            self.latency.add(at, utcnow())
         else:
             _, ok, at = item
             engine.set_connected(ok, at)

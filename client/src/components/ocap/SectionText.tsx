@@ -23,8 +23,16 @@ export function Excerpt({ text }: { text: string }) {
   )
 }
 
-/** One OCAP section's text in full, exactly as read from its file, under its citation (OCP-02: the exact source). */
-export function SectionText({ sectionId, section: given = null }: { sectionId: string; section?: OcapSection | null }) {
+/**
+ * One OCAP section's text in full, exactly as read from its file, under its citation (OCP-02: the exact source). In
+ * Tagalog (`tagalog`), its Tagalog text comes first when there's one, saying whose: the plant's checked version
+ * (ADR-0044) or the local AI's (ADR-0045). The English stays below it, as the official text.
+ */
+export function SectionText({ sectionId, section: given = null, tagalog = false }: {
+  sectionId: string
+  section?: OcapSection | null
+  tagalog?: boolean
+}) {
   const [section, setSection] = useState<OcapSection | null>(given)
   const [error, setError] = useState<string | null>(null)
 
@@ -42,6 +50,15 @@ export function SectionText({ sectionId, section: given = null }: { sectionId: s
     <div className="bg-surface-muted border-line-soft mt-2 flex flex-col gap-2 rounded-md border p-3">
       {section.status !== 'active' && (
         <p className="text-warning text-[11px]">{section.code} v{section.version} is now {OCAP_STATUS_LABEL[section.status]}: no longer offered</p>
+      )}
+      {tagalog && section.fil && (
+        <>
+          <p className="text-ink-muted text-[11px] font-medium">
+            {section.fil.by === 'ai' ? 'Salin ng AI · maaaring may mali, kaya basahin din ang English' : 'Sa Tagalog · sinuri ng plant'}
+          </p>
+          <p className="text-ink max-h-[320px] overflow-y-auto whitespace-pre-wrap">{section.fil.body}</p>
+          <p className="text-ink-muted border-line-soft border-t pt-2 text-[11px] font-medium">Opisyal na OCAP (English)</p>
+        </>
       )}
       <p className="text-ink max-h-[320px] overflow-y-auto whitespace-pre-wrap">{section.body || '(no text under this heading)'}</p>
       {section.hasFile && (

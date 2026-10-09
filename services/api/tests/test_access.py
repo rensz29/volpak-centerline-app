@@ -114,6 +114,11 @@ EXPECTED = {
     ("POST", "/api/v1/ocaps/{document_id}/versions"): MGR,
     ("POST", "/api/v1/ocaps/versions/{version_id}/activate"): MGR,
     ("POST", "/api/v1/ocaps/versions/{version_id}/suspend"): MGR,
+    ("POST", "/api/v1/ocaps/sections/{section_id}/reason"): MGR,  # which mismatches offer an Excel row as a reason (ADR-0039)
+    ("POST", "/api/v1/ocaps/versions/{version_id}/translations"): MGR,  # the plant's checked Tagalog version (ADR-0044)
+    ("POST", "/api/v1/ocaps/translations/{translation_id}/activate"): MGR,
+    ("POST", "/api/v1/ocaps/translations/{translation_id}/withdraw"): MGR,
+    ("GET", "/api/v1/ocaps/translations/{translation_id}/original"): EVERY,
     ("GET", "/api/v1/config/workflow"): PRIV,
     ("PUT", "/api/v1/config/workflow"): ADM,
     # accounts and the detailed health

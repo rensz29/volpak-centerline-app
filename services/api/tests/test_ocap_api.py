@@ -15,7 +15,10 @@ from centerline_api.main import create_app
 from . import ocap_samples as samples
 from .conftest import add_account, make_settings, new_client, sign_in
 from .ocap_samples import FakeClamd
-from .test_workflow_api import REQUESTS, mismatch, operator
+from centerline_common import workflow as workflow_mod
+
+from .test_monitoring_api import event
+from .test_workflow_api import REQUESTS, me, mismatch, operator
 
 OCAPS = "/api/v1/ocaps"
 
@@ -217,3 +220,153 @@ def test_an_infected_attachment_is_refused_and_the_request_still_waits_for_guida
                                                         "attachment": {"name": "x.docx", "contentBase64": b64(samples.infected_docx())}})
     assert r.status_code == 422 and r.json()["type"] == "/problems/malware-found"
     assert op.get(f"{REQUESTS}/{rid}").json()["next"] == "guidance"
+
+
+# -- Excel OCAPs and the reasons they offer (ADR-0039) ----------------------------------------------------------------
+
+def _sealer(manager) -> dict:
+    v = upload(manager, samples.sealer_xlsx(), code="OCAP-040", title="Sealer OCAP and troubleshooting",
+               name="ocap-sealer.xlsx").json()
+    return v | {"by": {s["heading"]: s for s in v["sections"]}}
+
+
+def test_an_excel_ocap_offers_its_rows_as_reasons_which_a_manager_checks(make_client, database):
+    manager = make_client(roles=["MANAGER"])
+    v = _sealer(manager)
+    assert v["mediaType"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" and v["pages"] is None
+    first = v["by"]["1. Weak seal on the vertical side"]
+    assert (first["sheet"], first["rowFrom"], first["rowTo"], first["pageFrom"]) == ("OCAP - Sealing", 4, 5, None)
+    assert first["citation"] == "OCAP-040 v1 · 1. Weak seal on the vertical side · OCAP - Sealing, rows 4–5"
+    tags = {h: (s["reason"]["parameterIds"], s["reason"]["direction"]) for h, s in v["by"].items() if s["reason"]}
+    assert tags == {  # proposed from the file
+        "1. Weak seal on the vertical side": (["P02"], "either"), "2. Weak bottom seal": (["P03"], "either"),
+        "3. Weak top seal": (["P04"], "either"), "1. Seal separates easily": (["P02", "P03", "P04"], "raised"),
+        "2. Burnt or brittle seal": (["P02", "P03", "P04"], "lowered"), "3. Seal not centred on the cutter": ([], "either"),
+        "4. Vertical seal narrower than 6 mm": (["P02"], "either")}
+    assert v["by"]["Notes"]["reason"] is None and v["by"]["1. Seal separates easily"]["reason"]["why"] == "Proposed from the file"
+    assert {"id": "P02", "name": "Vertical Temperature"} in v["reasonParameters"]
+    assert "P08" not in {p["id"] for p in v["reasonParameters"]}  # analytics only: never mismatched
+
+    cutter = v["by"]["3. Seal not centred on the cutter"]["id"]
+    url = f"{OCAPS}/sections/{cutter}/reason"
+    assert manager.post(url, json={"parameterIds": ["P02"], "direction": "either"}).status_code == 422  # no reason given
+    r = manager.post(url, json={"parameterIds": ["P02", "P08"], "direction": "either", "reason": "Cutter on every sealer"})
+    assert r.status_code == 422 and "P08" in r.json()["errors"][0]["message"]
+    assert operator(make_client).post(url, json={"parameterIds": ["P02"], "reason": "mine"}).status_code == 403
+    r = manager.post(f"{OCAPS}/sections/{v['by']['Notes']['id']}/reason", json={"parameterIds": ["P02"], "reason": "a note"})
+    assert r.status_code == 409 and r.json()["type"] == "/problems/not-a-reason"
+    after = manager.post(url, json={"parameterIds": ["P04", "P02"], "direction": "either", "reason": "The cutter follows every sealer"}).json()
+    tag = next(s for s in after["sections"] if s["id"] == cutter)["reason"]
+    assert (tag["parameterIds"], tag["why"], tag["by"]) == (["P02", "P04"], "The cutter follows every sealer", me(manager))
+    with database.connect() as conn:
+        (entry,) = conn.execute("SELECT summary, reason FROM audit_log WHERE action = 'ocap.reason'").fetchall()
+    assert entry["summary"] == "OCAP-040 v1 · 3. Seal not centred on the cutter: offered as a reason for P02, P04"
+
+
+def test_the_operator_picks_a_reason_and_sees_its_row_or_types_one_and_the_search_runs(make_client, database):
+    manager = make_client(roles=["MANAGER"])
+    v = _sealer(manager)
+    eid, rid = mismatch(database)  # Vertical 1's HMI setpoint raised: 222 against 180
+    op = operator(make_client)
+    (req,) = op.get(REQUESTS).json()["requests"]
+    assert req["choices"] == []  # a Draft offers nothing (OCP-01)
+
+    activate(manager, v["id"])
+    (req,) = op.get(REQUESTS).json()["requests"]
+    assert [c["label"] for c in req["choices"]] == [  # raised first, then either way; never the lowered "burnt" row
+        "Seal separates easily", "Weak seal on the vertical side", "Vertical seal narrower than 6 mm"]
+    picked = req["choices"][0]
+    assert picked["citation"] == "OCAP-040 v1 · 1. Seal separates easily · Troubleshooting, row 4" and picked["direction"] == "raised"
+
+    burnt = v["by"]["2. Burnt or brittle seal"]["id"]
+    r = op.post(f"{REQUESTS}/{rid}/reason", json={"sectionId": burnt})
+    assert r.status_code == 422 and r.json()["type"] == "/problems/not-offered"
+    done = op.post(f"{REQUESTS}/{rid}/reason", json={"sectionId": picked["sectionId"], "note": "  Heater 1 still warming  "}).json()
+    reason = done["entries"][0]
+    assert (reason["kind"], reason["body"]) == ("reason", "Seal separates easily\nHeater 1 still warming")
+    assert reason["section"]["body"].startswith("Sealer / Area: Top / Bottom / Vertical") and done["choices"] == []
+    req = op.post(f"{REQUESTS}/{rid}/answers", json={"answers": ["Waited for the heater", "No"]}).json()
+    assert [o["sectionId"] for o in req["offered"]] == [picked["sectionId"]]  # its own row, no search
+    op.post(f"{REQUESTS}/{rid}/ocap", json={"sectionId": picked["sectionId"]})
+    assert op.post(f"{REQUESTS}/{rid}/acknowledge").json()["status"] == "done"
+    with database.connect() as conn:
+        (row,) = conn.execute("SELECT rank, method FROM ocap_recommendation WHERE request_id = %s", (rid,)).fetchall()
+        assert (row["rank"], row["method"]) == (1, "reason")
+        v_ids = conn.execute("SELECT config_version_id, mapping_version_id, register_version_id FROM event WHERE id = %s",
+                             (eid,)).fetchone()
+        lowered = event(conn, tuple(v_ids.values()), "HMI_MISMATCH", "P02", "V2", "OPEN", hmi=170)
+        workflow_mod.open_request(conn, lowered, conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"])
+        conn.commit()
+        rid2 = str(conn.execute("SELECT id FROM workflow_request WHERE event_id = %s", (lowered,)).fetchone()["id"])
+
+    req2 = next(r for r in op.get(REQUESTS).json()["requests"] if r["id"] == rid2)
+    assert [c["label"] for c in req2["choices"]] == [  # lowered: the burnt row now, and not the raised one
+        "Burnt or brittle seal", "Weak seal on the vertical side", "Vertical seal narrower than 6 mm"]
+    op.post(f"{REQUESTS}/{rid2}/reason", json={"text": "Other: sunog yung seal sa vertical"})  # typed: "Other"
+    req2 = op.post(f"{REQUESTS}/{rid2}/answers", json={"answers": ["Binabaan ko", "Oo"]}).json()
+    assert "section" not in req2["entries"][0] and req2["entries"][0]["body"] == "Other: sunog yung seal sa vertical"
+    with database.connect() as conn:
+        assert {r["method"] for r in conn.execute("SELECT method FROM ocap_recommendation WHERE request_id = %s", (rid2,))} <= {"keyword"}
+
+
+def test_a_guidance_file_is_still_pdf_or_word(make_client, database):
+    manager = make_client(roles=["MANAGER"])
+    eid, rid = mismatch(database)
+    op = operator(make_client)
+    op.post(f"{REQUESTS}/{rid}/reason", json={"text": "No OCAP for this"})
+    op.post(f"{REQUESTS}/{rid}/answers", json={"answers": ["x", "y"]})
+    r = manager.post(f"{REQUESTS}/{rid}/guidance", json={"text": "Do this", "attachment": {
+        "name": "sheet.xlsx", "contentBase64": b64(samples.sealer_xlsx())}})
+    assert r.status_code == 422 and r.json()["detail"] == "It's a zip file, but not a Word document (.docx)"
+
+
+# -- A checked Tagalog version (ADR-0044) -----------------------------------------------------------------------------
+
+def test_a_checked_tagalog_version_is_paired_row_by_row_and_shown_to_operators_once_active(make_client, database):
+    manager = make_client(roles=["MANAGER"])
+    v = _sealer(manager)
+    activate(manager, v["id"])
+    _, rid = mismatch(database)  # Vertical 1 raised
+    op = operator(make_client)
+    url = f"{OCAPS}/versions/{v['id']}/translations"
+    upload_fil = lambda data, name="ocap-sealer-tagalog.xlsx", reason="Checked by the line's senior operator": manager.post(
+        url, json={"language": "fil", "source": name, "contentBase64": b64(data), "reason": reason})
+
+    assert op.post(url, json={"language": "fil", "source": "x.xlsx", "contentBase64": b64(samples.sealer_xlsx_fil()),
+                              "reason": "mine"}).status_code == 403
+    r = upload_fil(samples.bottom_docx(), name="other.docx")
+    assert r.status_code == 422 and "the same sheets and rows as the OCAP" in r.json()["detail"] and "has no match" in r.json()["detail"]
+    assert upload_fil(samples.sealer_xlsx_fil(), reason="").status_code == 422  # a reason is required
+
+    drafted = upload_fil(samples.sealer_xlsx_fil())
+    assert drafted.status_code == 201
+    view = drafted.json()
+    (t,) = view["translations"]
+    assert (t["language"], t["status"], t["source"]) == ("fil", "draft", "ocap-sealer-tagalog.xlsx")
+    first = next(s for s in view["sections"] if s["heading"] == "1. Seal separates easily")
+    assert first["fil"]["phenomenon"] == "Madaling matanggal ang seal" and first["fil"]["status"] == "draft"
+    (req,) = op.get(REQUESTS).json()["requests"]
+    picked = next(c for c in req["choices"] if c["label"] == "Seal separates easily")
+    assert picked["labelFil"] is None  # a Draft isn't shown to operators
+
+    activated = manager.post(f"{OCAPS}/translations/{t['id']}/activate", json={"reason": "Checked and approved"}).json()
+    assert activated["translations"][0]["status"] == "active"
+    (req,) = op.get(REQUESTS).json()["requests"]
+    picked = next(c for c in req["choices"] if c["label"] == "Seal separates easily")
+    assert picked["labelFil"] == "Madaling matanggal ang seal"
+    section = op.get(f"{OCAPS}/sections/{picked['sectionId']}").json()
+    assert section["body"].startswith("Sealer / Area: Top / Bottom / Vertical")  # the English stays the source (OCP-02)
+    assert "Ihiwalay ang mga pouch at hayaang umabot sa preset ang mga heater." in section["fil"]["body"]
+    assert op.get(f"{OCAPS}/translations/{t['id']}/original").content == samples.sealer_xlsx_fil()
+
+    again = upload_fil(samples.sealer_xlsx_fil(), name="ocap-sealer-tagalog-rev2.xlsx").json()
+    newer = again["translations"][0]
+    manager.post(f"{OCAPS}/translations/{newer['id']}/activate", json={"reason": "Revision 2"})
+    statuses = {x["source"]: x["status"] for x in manager.get(f"{OCAPS}/versions/{v['id']}").json()["translations"]}
+    assert statuses == {"ocap-sealer-tagalog-rev2.xlsx": "active", "ocap-sealer-tagalog.xlsx": "superseded"}
+    manager.post(f"{OCAPS}/translations/{newer['id']}/withdraw", json={"reason": "Wording under review"})
+    assert op.get(f"{OCAPS}/sections/{picked['sectionId']}").json()["fil"] is None
+    with database.connect() as conn:
+        actions = [r["action"] for r in conn.execute("SELECT action FROM audit_log WHERE action LIKE 'ocap.translation%' ORDER BY seq")]
+    assert actions == ["ocap.translation", "ocap.translation.activate", "ocap.translation", "ocap.translation.activate",
+                       "ocap.translation.withdraw"]

@@ -4,6 +4,7 @@ import {
   BookOpen,
   ClipboardList,
   GitCompareArrows,
+  HeartPulse,
   History,
   Send,
   Settings2,
@@ -44,6 +45,7 @@ export const ROUTES = {
   notifications: '/notifications',
   reasons: '/reasons',
   ocaps: '/ocaps',
+  health: '/health',
 } as const
 
 export const navSections: NavSection[] = [
@@ -125,6 +127,13 @@ export const navSections: NavSection[] = [
         to: ROUTES.accounts,
         icon: UsersRound,
         description: 'Who can sign in, with which roles',
+        roles: ['ADMINISTRATOR'],
+      },
+      {
+        label: 'System health',
+        to: ROUTES.health,
+        icon: HeartPulse,
+        description: 'Each part of Centerline graded OK, warning or critical: monitoring, notifications, backups, database',
         roles: ['ADMINISTRATOR'],
       },
     ],

@@ -26,8 +26,14 @@ On the plant network its signatures need another way in (O-24).
 
 ```bash
 deploy/setup.sh                                       # once: deploy/config, seeded from config/
-docker compose -f deploy/compose.yaml up -d --build
+deploy/compose.sh up -d --build
 ```
+
+**`deploy/compose.sh`** is `docker compose -f deploy/compose.yaml` plus what this PC runs, from `deploy/.env`
+([ADR-0049](../docs/decisions/ADR-0049-production-runs-the-laptops-stack.md)): `deploy/compose.gpu.yaml` when
+`CENTERLINE_GPU=nvidia` (Ollama on the GPU), `deploy/compose.sim.yaml` when `CENTERLINE_SIMULATOR=on` (away from the
+plant only). Use it for every command, so a restart never brings Ollama back without its GPU. The commands below
+written as `docker compose -f deploy/compose.yaml …` work the same through it.
 
 - **`deploy/config`** (git-ignored, 0700) is this host's settings and secrets, mounted at `/app/config`. It holds
   the three services' settings (`api.json`, `monitor-core.json`, `notifier.json`) and the connections the
@@ -42,6 +48,8 @@ docker compose -f deploy/compose.yaml up -d --build
     certificate.
   - `CENTERLINE_BIND` and `CENTERLINE_PORT`: the address and port (127.0.0.1:6040 here).
   - `CENTERLINE_UID`: the owner of `deploy/config`.
+  - `CENTERLINE_GPU`: `nvidia` when Docker reaches an NVIDIA GPU (`setup.sh` checks once), else `none`.
+  - `CENTERLINE_SIMULATOR`: `on` only away from the plant; `off` on the line.
   To set it up on another machine, see [the README's deployment guide](../README.md#deploy-on-another-machine).
 
 **One monitor-core judges the line at a time.** Before starting this stack's `monitor-core` and `notifier`, stop the
@@ -99,18 +107,89 @@ The api then applies the migrations the copy lacks. The accounts, configuration,
 ## Day to day
 
 ```bash
-docker compose -f deploy/compose.yaml ps                    # what runs, and the health checks
-docker compose -f deploy/compose.yaml logs -f monitor-core  # any service's log
-docker compose -f deploy/compose.yaml stop                  # stop everything; data stays
-docker compose -f deploy/compose.yaml up -d --build         # after a code change: rebuild and restart
-docker compose -f deploy/compose.yaml exec backup python -m centerline_backup now   # a backup set now, as before a migration
+deploy/compose.sh ps                    # what runs, and the health checks
+deploy/compose.sh logs -f monitor-core  # any service's log
+deploy/compose.sh stop                  # stop everything; data stays
+deploy/compose.sh up -d --build         # after a code change: rebuild and restart
+deploy/compose.sh exec backup python -m centerline_backup now   # a backup set now, as before a migration
 ```
 
 - **Restarts:** the containers restart by themselves after a crash or when Docker starts. A stopped one stays stopped.
+- **After an update,** browsers get the new page on their next reload: the page is never cached, its files (named by
+  their content) always are. A tab left open keeps the version it loaded until it's reloaded.
+- **System health** ([ADR-0038](../docs/decisions/ADR-0038-system-health-page.md)): Administrators open **System health**
+  (under Setup) for every part graded at once, with what to do. The api reads `deploy/backups/status.json` read-only.
+- **Storage (RES-02, [ADR-0036](../docs/decisions/ADR-0036-storage-degraded-mode-and-at07.md)):** monitor-core measures the disk
+  under the database's volume every minute. Every page shows a banner from 80 %, and in protected degraded mode (90 %
+  for 10 min, ending below 85 %) uploads are refused. Each container's log is capped at 3 × 10 MB. To see the reading:
+  `docker compose -f deploy/compose.yaml exec postgres psql -U centerline -d centerline -Atc "SELECT status->'storage' FROM monitor_heartbeat"`.
 - **Switching HTTP and HTTPS:** change `CENTERLINE_SCHEME` in `deploy/.env`, then
   `docker compose -f deploy/compose.yaml up -d proxy api` (the api sets its cookie by it).
 - **Wiping:** `down -v` deletes the database, the journal and the proxy's CA. History is meant to be kept: the
   backup sets in `deploy/backups` stay, because they're a folder on the host, not a volume.
+
+## The AI model
+
+The `ollama` container answers the api only ([ADR-0041](../docs/decisions/ADR-0041-local-ai-follow-up-questions.md)). It needs its model once, from the internet
+(about 3.3 GB), then keeps it in its volume; the offline kit carries it to a PC without the internet:
+
+```bash
+docker compose -f deploy/compose.yaml exec ollama ollama pull qwen3.5:4b
+docker compose -f deploy/compose.yaml exec ollama ollama pull bge-m3      # the OCAP search by meaning (ADR-0048), 1.2 GB
+docker compose -f deploy/compose.yaml exec ollama ollama list          # their digests, for model_digest and embed_model_digest in api.json
+```
+
+- **On the GPU** ([ADR-0049](../docs/decisions/ADR-0049-production-runs-the-laptops-stack.md)): Ollama is its own container in the
+  stack, here and on the server; with `CENTERLINE_GPU=nvidia`, `deploy/compose.sh` gives it the NVIDIA GPU. Docker must
+  reach the GPU: on Linux the NVIDIA driver and the NVIDIA Container Toolkit, on Windows WSL2 with the NVIDIA driver.
+  Check: `docker run --rm --gpus all pgvector/pgvector:pg17 nvidia-smi -L` lists it. System health says how much of the
+  model is on the GPU, and warns when none of it is.
+- **Pinned:** `ai.model_digest` in `deploy/config/api.json` is the digest `ollama list` shows (or the full one from
+  `/api/tags`); a model with another digest isn't used. After changing it: `docker compose -f deploy/compose.yaml restart api`.
+- **Kept warm:** `ai.warm_every_s` (60) has the api reload the model after a restart, so a first question doesn't wait
+  for it to load (over a minute on a 4 GB GPU).
+- **Opening questions:** `ai.open_every_s` (2) has the api write each new request's first question from the OCAP
+  ([ADR-0042](../docs/decisions/ADR-0042-ai-opens-the-conversation.md)).
+- **The OCAP search by meaning:** with `ai.embed_model` (bge-m3) pulled, the api embeds the Active OCAPs' sections
+  (`ai.embed_every_s`, 10) and a search finds a section by what a Taglish reason means, merged with the keyword search
+  ([ADR-0048](../docs/decisions/ADR-0048-ocap-search-by-meaning.md)). Not pulled, or slow: keywords alone.
+- **The summary of the OCAP sections offered:** `ai.summary_every_s` (2) has the api sum up each request's sections
+  once they're offered, shown above them only when it's grounded in them
+  ([ADR-0046](../docs/decisions/ADR-0046-ai-summary-of-the-ocap.md)).
+- **The OCAP in Tagalog by the AI:** `ai.translate_every_s` (20; 0 switches it off) has the api translate one more
+  section of the Active OCAPs in English, while no operator is answering; each takes 20–60 s on a 4 GB GPU (`ai.translate_timeout_s`, 180). A translation
+  that changes a number or an instruction word is kept out, and that section stays English
+  ([ADR-0045](../docs/decisions/ADR-0045-ai-translates-the-ocap.md)). The OCAP's page shows how far it got.
+- **Off, slow or wrong,** operators get the fixed questions; System health says why.
+
+## Away from the plant: simulated data
+
+Off the plant network the broker and Timebase can't be reached. To keep testing, `deploy/compose.sim.yaml` adds a
+local MQTT broker (`sim-broker`, on the stack's network only) and the simulator (`tools/mqtt-sim`), which publishes
+Volpak-shaped data on the plant's topics and fields: steady values, a short setpoint change every 5 min, a mismatch
+nobody puts back every 10 min (for 15 min), and an actual value leaving its band every 15 min.
+
+Set `CENTERLINE_SIMULATOR=on` in `deploy/.env`, then:
+
+```bash
+deploy/compose.sh up -d sim-broker sim
+```
+
+Then the saved broker is `sim-broker`, port 1883, no TLS, no account: on the Connections tab, or in
+`deploy/config/connections.json` (monitor-core and the api pick the file up by themselves). Keep the plant's settings
+first, as `deploy/config/connections.plant.json`. The simulator's setpoints are Vertical 1–6 at 220, 215, 215, 220,
+214, 214 °C, Bottom at 180, Top at 185, the nozzles at 98 and Pressure at 1.3: Rules targets other than these show as
+HMI mismatches on every zone. In the Rules editor, **Fill empty targets from current HMI setpoints** takes them
+from monitor-core's live values (the Tags and Rules tabs prefer those to Timebase's, at the plant too).
+
+Everything monitor-core judges goes into the stack's database as if it were real. Back at the plant:
+
+```bash
+deploy/compose.sh rm -sf sim sim-broker
+cp -p deploy/config/connections.plant.json deploy/config/connections.json   # or save the plant broker on the Connections tab
+```
+
+and set `CENTERLINE_SIMULATOR=off` in `deploy/.env`.
 
 ## Backups and restore
 
@@ -150,7 +229,19 @@ It checks the set's checksums and takes `deploy/config` from the set when the PC
 It starts nothing else. On a new PC: install Docker, clone the repository, restore, check `deploy/.env`, run
 `deploy/setup.sh` (it adds only what's missing), start. Everything after the set's time is lost: at most an hour.
 
-**Restore drill (quarterly, BKP-02):** on a clean machine without the internet, restore the newest off-host set and
+**The offline install kit** ([ADR-0037](../docs/decisions/ADR-0037-offline-install-kit.md)). A new PC also needs the images,
+and building them needs the internet. The kit carries them, with ClamAV's signatures and the repository:
+
+```bash
+deploy/kit.sh make            # after each release (commit first): deploy/backups/kits/, the two newest kept, copied off-host
+deploy/kit.sh verify <kit>    # its checksums and archives
+deploy/kit.sh load <kit>      # on the new PC: the images and ClamAV's signatures
+```
+
+A kit is about 600 MB and holds no secrets. Its `RESTORE.md` is the whole restore on a PC without the internet:
+Docker and git, `git clone <kit>/centerline.bundle`, `kit.sh load`, `restore.sh`, then `up -d` **without** `--build`.
+
+**Restore drill (quarterly, BKP-02):** on a clean machine without the internet, follow the newest kit's `RESTORE.md` with the newest off-host set and
 start the stack with monitor-core stopped (`docker compose … up -d` then `docker compose … stop monitor-core`), sign
 in, and record the time from start to sign-in. On a PC with the stack running, a drill can run beside it as its own
 project, which touches nothing of the running stack:

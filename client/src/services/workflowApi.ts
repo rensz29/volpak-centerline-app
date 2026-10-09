@@ -20,8 +20,9 @@ export const workflowApi = {
     return request<WorkflowRequest>(`/api/v1/workflow/requests/${id}`)
   },
 
-  reason(id: string, text: string): Promise<WorkflowRequest> {
-    return request<WorkflowRequest>(`/api/v1/workflow/requests/${id}/reason`, json('POST', { text }))
+  /** Typed, or picked from the request's choices with an optional note (ADR-0039) */
+  reason(id: string, body: { text: string } | { sectionId: string; note: string }): Promise<WorkflowRequest> {
+    return request<WorkflowRequest>(`/api/v1/workflow/requests/${id}/reason`, json('POST', body))
   },
 
   answers(id: string, answers: string[]): Promise<WorkflowRequest> {

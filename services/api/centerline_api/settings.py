@@ -72,12 +72,38 @@ class ScannerSettings:
 
 
 @dataclass(frozen=True)
+class AiSettings:
+    """The local language model the reason workflow asks (AI-01, ADR-0041): Ollama on this host, never a cloud service.
+    Off, or slow or wrong, the fixed questions are asked instead: nothing waits for it."""
+
+    enabled: bool = False
+    url: str = "http://127.0.0.1:11434"  # Ollama's API
+    model: str = ""  # e.g. qwen3.5:4b
+    model_digest: str | None = None  # when set, a model whose digest differs isn't used (pinned by digest, SDD §7.2)
+    timeout_s: float = 25.0  # PER-01 gives an AI result 30 s
+    num_ctx: int = 4096  # the prompt is at most ~2500 tokens; a bigger context leaves less of the model on a small GPU
+    think: bool | None = False  # the model's thinking off, for speed; None for a model that has none
+    warm_every_s: float = 0  # how often to check the model is loaded, and load it if not; 0: never (a development PC)
+    open_every_s: float = 0  # how often to write the opening questions of new requests (ADR-0042); 0: never
+    # The OCAP search by meaning (ADR-0048): the embedding model, pinned like the chat model; "" for keyword search only
+    embed_model: str = ""  # e.g. bge-m3
+    embed_model_digest: str | None = None
+    embed_every_s: float = 0  # how often to embed the Active OCAPs' sections not embedded yet; 0: never
+    embed_timeout_s: float = 5.0  # a search's own embedding: an OCAP search has 10 s (PER-01), then it's keywords alone
+    min_similarity: float = 0.45  # a section nearer than this to what was written isn't a match by meaning
+    summary_every_s: float = 0  # how often to write the summaries of the OCAP sections offered (ADR-0046); 0: never
+    translate_every_s: float = 0  # how often to translate one more OCAP section into Tagalog (ADR-0045); 0: never
+    translate_timeout_s: float = 180.0  # a whole section, in the background: nobody waits for it
+
+
+@dataclass(frozen=True)
 class Settings:
     timebase: dict  # passed to TimebaseClient: base_url, dataset, auth, timeout_s, verify_tls
     register_path: Path
     analytics: AnalyticsSettings = field(default_factory=AnalyticsSettings)
     auth: AuthSettings = field(default_factory=AuthSettings)
     scanner: ScannerSettings = field(default_factory=ScannerSettings)
+    ai: AiSettings = field(default_factory=AiSettings)
     cors_origins: tuple[str, ...] = ()
     audit_log: Path | None = None
     # Configuration page: connections.json, secrets/ and history/ live here (git-ignored)
@@ -86,6 +112,8 @@ class Settings:
     migrate_on_start: bool = True  # apply db/migrations when the api starts
     # When `database` is the services' role (centerline_app, ADR-0020), the migrations need the owner
     migrate_database: DatabaseConfig | None = None
+    # The backup agent's status.json, read-only, for the health page (ADR-0035, ADR-0038); None where backups don't run
+    backup_status: Path | None = None
 
 
 def load_settings(path: str | Path | None = None) -> Settings:
@@ -118,6 +146,7 @@ def load_settings(path: str | Path | None = None) -> Settings:
         analytics=analytics,
         auth=auth,
         scanner=ScannerSettings(**{k: v for k, v in (raw.get("scanner") or {}).items() if k in ScannerSettings.__dataclass_fields__}),
+        ai=AiSettings(**{k: v for k, v in (raw.get("ai") or {}).items() if k in AiSettings.__dataclass_fields__}),
         cors_origins=tuple(raw.get("cors_origins") or ()),
         audit_log=rel(raw.get("audit_log")),
         config_dir=rel(raw.get("config_dir")) or REPO / "config",
@@ -126,4 +155,5 @@ def load_settings(path: str | Path | None = None) -> Settings:
         migrate_on_start=bool(raw.get("migrate_on_start", True)),
         migrate_database=(DatabaseConfig.from_dict(raw["migrate_database"], base) if raw.get("migrate_database")
                           else None if raw.get("database") else DatabaseConfig()),
+        backup_status=rel(raw.get("backup_status")),
     )

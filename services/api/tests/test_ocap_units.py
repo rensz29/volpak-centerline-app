@@ -1,4 +1,5 @@
-"""OCAP files read into sections with their pages, and the malware scanner's protocol (ADR-0031)."""
+"""OCAP files read into sections with their pages or rows, the reasons they offer, and the malware scanner's protocol
+(ADR-0031, ADR-0039)."""
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ import zipfile
 import pytest
 
 from centerline_api.ocap import parse
+from centerline_api.ocap.choices import direction_of, propose
 from centerline_api.ocap.scan import ScannerUnavailable, scan
 from centerline_api.ocap.store import _chunks, citation
 from centerline_api.settings import ScannerSettings
@@ -44,7 +46,7 @@ def test_a_filipino_pdf_and_a_word_file_with_its_styles_and_page_break():
     assert "Rear bottom | 180 °C" in word.sections[2].body  # a table, row by row
 
 
-def test_only_pdf_and_word_files_with_text_are_read():
+def test_only_pdf_word_and_excel_files_with_text_are_read():
     for data, why in ((b"\xd0\xcf\x11\xe0 an old .doc", "save it as .docx"), (b"plain text", "Only PDF and Word"),
                       (_zip({"x.txt": b"x"}), "not a Word document")):
         with pytest.raises(parse.Unreadable, match=why):
@@ -59,6 +61,60 @@ def test_only_pdf_and_word_files_with_text_are_read():
         parse.parse(b"%PDF-1.4 not really a pdf", parse.PDF)
 
 
+EVERY = (parse.PDF, parse.DOCX, parse.XLSX)
+
+
+def test_an_excel_workbook_is_read_row_by_row_with_its_sheet_rows_and_phenomenon():
+    data = samples.sealer_xlsx()
+    assert parse.sniff(data, EVERY) == parse.XLSX
+    with pytest.raises(parse.Unreadable, match="not a Word document"):
+        parse.sniff(data)  # a guidance's file is PDF or Word (GDE-01)
+    parsed = parse.parse(data, parse.XLSX)
+    assert parsed.pages is None
+    assert [(s.sheet, s.row_from, s.row_to, s.heading, s.phenomenon) for s in parsed.sections] == [
+        ("OCAP - Sealing", 4, 5, "1. Weak seal on the vertical side", "Weak seal on the vertical side"),  # merged rows: one block
+        ("OCAP - Sealing", 6, 6, "2. Weak bottom seal", "Weak bottom seal"),
+        ("OCAP - Sealing", 7, 7, "3. Weak top seal", "Weak top seal"),
+        ("Troubleshooting", 1, 2, "SEALER TROUBLESHOOTING", None),  # its title lines, but not the OCAP sheet's lone title
+        ("Troubleshooting", 4, 4, "1. Seal separates easily", "Seal separates easily"),
+        ("Troubleshooting", 5, 5, "2. Burnt or brittle seal", "Burnt or brittle seal"),
+        ("Troubleshooting", 6, 6, "3. Seal not centred on the cutter", "Seal not centred on the cutter"),
+        ("Troubleshooting", 7, 7, "4. Vertical seal narrower than 6 mm", "Vertical seal narrower than 6 mm"),
+        ("Troubleshooting", 9, 9, "Notes", None)]  # below the empty row; the hidden sheet isn't read
+    first = parsed.sections[0]
+    assert first.body.startswith("Phenomena: Weak seal on the vertical side\nAssembly: Vertical Sealer")
+    assert "Inspection:\n1. Compare the vertical heaters on the HMI\n2. Check the seal width" in first.body
+    assert "Why change?" not in first.body and "OCAP #" not in first.body  # the group header and the number column
+    assert (first.area, first.cause) == ("Vertical Sealer Vertical Sealing 1 - 6", None)
+    assert parsed.sections[4].cause == "Temperature too low; heater not warm yet"
+    assert parsed.sections[-1].body == "CONTROL NOTE: tell the Cell Lead before running outside the centerline."
+
+
+def test_a_workbook_that_unpacks_too_large_or_has_no_text_is_refused(monkeypatch):
+    monkeypatch.setattr(parse, "UNPACKED_MAX", 1000)
+    with pytest.raises(parse.Unreadable, match="unpacks to more than"):
+        parse.parse(samples.sealer_xlsx(), parse.XLSX)
+    monkeypatch.undo()
+    with pytest.raises(parse.Unreadable, match="no text"):
+        parse.parse(samples.xlsx([("Empty", {}, [], False)]), parse.XLSX)
+    with pytest.raises(parse.Unreadable, match="save it as .docx or .xlsx"):
+        parse.sniff(b"\xd0\xcf\x11\xe0 an old .xls", EVERY)
+
+
+PARAMETERS = [{"id": "P02", "name": "Vertical Temperature"}, {"id": "P03", "name": "Bottom Temperature"},
+              {"id": "P04", "name": "Top Temperature"}, {"id": "P05", "name": "Hopper Pressure"}, {"id": "P09", "name": "Pressure"}]
+
+
+def test_a_rows_parameters_come_from_its_sealer_columns_and_its_direction_from_its_cause():
+    assert propose("Top / Bottom / Vertical", "Seal separates easily", "Temperature too low", PARAMETERS) == (["P02", "P03", "P04"], "raised")
+    assert propose("Vertical Sealer Vertical Sealing 1 - 6", None, None, PARAMETERS) == (["P02"], "either")
+    assert propose("Cutter", "Seal not centred", "Temperature too high", PARAMETERS) == ([], "lowered")
+    assert propose(None, "Weak bottom seal", "too low here, too high there", PARAMETERS) == (["P03"], "either")  # no area: the phenomenon
+    assert propose("Hopper pressure", None, None, PARAMETERS) == (["P05", "P09"], "either")  # every word of a name
+    assert [direction_of(222, 180), direction_of(170, 180), direction_of(180, 180), direction_of(None, 180)] == [
+        "raised", "lowered", None, None]
+
+
 def test_text_written_in_centerline_is_one_section_or_split_at_its_headings():
     assert headings(parse.from_text("Guidance for V1", "Set V1 back to 220 °C.")) == [("Guidance for V1", 1, None, None)]
     two = parse.from_text("Film change", "# Before\nStop the line.\n## After\nCheck the seal.")
@@ -71,6 +127,8 @@ def test_long_sections_are_searched_in_pieces_and_cited_with_their_pages():
     assert len(pieces) > 3 and all(len(p) <= 1200 for p in pieces) and "".join(pieces).count("Step") == 12
     assert citation("OCAP-017", 2, "3.2 Heater fault", 3, 4) == "OCAP-017 v2 · 3.2 Heater fault · pp. 3–4"
     assert citation("OCAP-030", 1, None, None, None) == "OCAP-030 v1 · Opening text"
+    assert citation("OCAP-040", 1, "1. Weak seal", None, None, "OCAP - Sealing", 4, 5) == "OCAP-040 v1 · 1. Weak seal · OCAP - Sealing, rows 4–5"
+    assert citation("OCAP-040", 1, "Notes", None, None, "Troubleshooting", 9, 9) == "OCAP-040 v1 · Notes · Troubleshooting, row 9"
 
 
 @pytest.fixture

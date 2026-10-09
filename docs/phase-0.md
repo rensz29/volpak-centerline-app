@@ -83,8 +83,14 @@ and out of git.
     as out of range;
   - Actual rules pause while the machine is stopped and for 30 min after long
     stops (ADR-0010). Is that acceptable?
-- **OT / IT:**
+- **OT / IT** (the owner, 2026-10-07: treat these as approved; each is configured when its details arrive):
   - the control-room PC: Windows 11 Pro or LTSC, Hyper-V, about 200 GB free,
     wired LAN;
   - a firewall rule from that PC to the broker;
-  - NTP.
+  - NTP;
+  - an off-host place for the backups (O-27, [ADR-0035](decisions/ADR-0035-backups-pg-dump.md));
+  - the Teams flow and the SMTP relay (O-05);
+  - HTTPS: a certificate, or permission to install a local CA (O-25);
+  - ClamAV's signature updates on the plant network (O-24);
+  - offline install packages for Docker Engine and git, kept with the backups
+    ([ADR-0037](decisions/ADR-0037-offline-install-kit.md)).

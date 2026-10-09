@@ -31,15 +31,19 @@ The api service from the SDD (§3, §10). So far it contains:
 - **Accounts, sign-in and roles** ([ADR-0016](../../docs/decisions/ADR-0016-accounts-sign-in-and-roles.md)): local accounts, server-side sessions,
   and the owner's decisions on who may do what, checked on every call. An operator's session ends with its shift ([ADR-0025](../../docs/decisions/ADR-0025-shifts-and-reasons.md)).
 - **The reason workflow** ([ADR-0025](../../docs/decisions/ADR-0025-shifts-and-reasons.md), [ADR-0031](../../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)). monitor-core makes a request for every HMI mismatch, one per shift. Here:
-  - the operator gives the reason and answers the follow-up questions;
-  - up to three sections of the Active OCAPs are offered; the operator chooses one and acknowledges it, or says none
-    of them apply;
+  - the operator picks the reason from the Excel OCAP rows offered for the mismatch, or types one, and answers the
+    follow-up questions ([ADR-0039](../../docs/decisions/ADR-0039-excel-ocaps-and-picked-reasons.md));
+  - a picked reason's own row is offered, or up to three sections of the Active OCAPs that match a typed one; the
+    operator chooses it and acknowledges it, or says none of them apply;
   - then a Manager gives guidance, with one PDF or Word file and, if they like, kept as a reusable OCAP; the operator
     acknowledges it;
-  - an Administrator sets the questions.
+  - an Administrator sets the fixed questions; the local AI (Ollama) writes at most two from the OCAP sections for the
+    reason instead, when it can, checked and kept with every call ([ADR-0041](../../docs/decisions/ADR-0041-local-ai-follow-up-questions.md)).
 - **The OCAP library** ([ADR-0031](../../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)), without AI for now:
-  - a Manager uploads a PDF or Word file (20 MB at most), scanned by ClamAV before it's kept;
-  - it's read into sections with their pages, as a Draft;
+  - a Manager uploads a PDF, Word or Excel file (20 MB at most), scanned by ClamAV before it's kept;
+  - it's read into sections with their pages, an Excel workbook row by row, as a Draft. A row that names a phenomenon
+    is a reason to pick, for the parameters and direction proposed from the file, which a Manager can change
+    ([ADR-0039](../../docs/decisions/ADR-0039-excel-ocaps-and-picked-reasons.md));
   - the Manager activates it, keeping or retiring the earlier version, or suspends one;
   - every role reads the library and searches the Active versions by keyword (PostgreSQL full-text search,
     English or Filipino).
@@ -183,12 +187,13 @@ kept: a repeat answers 409. Times in answers are ISO 8601 UTC ending in `Z`.
 | PUT | `/api/v1/config/connections/notifications` | Administrator: the link base, the Teams flow URL and the SMTP relay; the URL and the password are write-only |
 | POST | `/api/v1/config/connections/notifications/email-test` | Administrator: connect to the relay and sign in, sending nothing |
 | GET | `/api/v1/workflow/requests`, `/workflow/requests/{id}` | Reason requests with every entry, the follow-up questions in effect and the counts per step: an operator sees the shift's, others the open ones and the last day's |
-| POST | `/api/v1/workflow/requests/{id}/reason`, `/answers`, `/ocap`, `/acknowledge` | The shift's operator: the reason (kept as typed), the answers in the questions' order, the OCAP section chosen among those offered (`sectionId`, or `null`: none of these apply), the acknowledgment of the section or the guidance. 409 out of order, for another shift, or closed |
+| POST | `/api/v1/workflow/requests/{id}/reason`, `/answers`, `/ocap`, `/acknowledge` | The shift's operator: the reason (`text`, kept as typed, or `sectionId` from the request's `choices` with an optional `note`), the answers in the questions' order, the OCAP section chosen among those offered (`sectionId`, or `null`: none of these apply), the acknowledgment of the section or the guidance. 409 out of order, for another shift, or closed |
 | POST | `/api/v1/workflow/requests/{id}/guidance` | Manager: the guidance for the operator (GDE-01); `attachment` (one PDF or Word file, base64, scanned) and `reusable` (`code`, `title`, `language`: also kept as an OCAP, active at once) are optional |
 | GET | `/api/v1/workflow/attachments/{id}` | A guidance's file, as uploaded |
 | GET | `/api/v1/ocaps`, `/ocaps/search?q=`, `/ocaps/versions/{id}`, `/ocaps/versions/{id}/original`, `/ocaps/sections/{id}` | Every OCAP with its versions and their status; the Active sections that match the words, with an excerpt («…» around the matches); one version read into sections, with its history and whether the stored file still matches its SHA-256; the file as uploaded; one section with its citation |
 | POST | `/api/v1/ocaps`, `/ocaps/{id}/versions` | Manager: a new OCAP (`code`, `title`, `language` `en` or `fil`, the file as base64, a reason), or a new version of one. Scanned, then read; a Draft. 422 for an infected or unreadable file (an old `.doc`, a scan without text), 503 with no scanner answering |
 | POST | `/api/v1/ocaps/versions/{id}/activate`, `/suspend` | Manager: search it from now on (`earlier`: `keep` the OCAP's other Active versions or `supersede` them), or stop searching it; with a reason, audited |
+| POST | `/api/v1/ocaps/sections/{id}/reason` | Manager: which HMI mismatches offer an Excel row as a reason (`parameterIds`, `direction` `raised`, `lowered` or `either`), with a reason, audited; 409 for a section that names no phenomenon |
 | GET, PUT | `/api/v1/config/workflow` | The follow-up questions and their changes; Administrator: change them (up to two, with a reason; audited) |
 
 Variables are `<parameter>.<zone>.actual` or `<parameter>.<zone>.setpoint`

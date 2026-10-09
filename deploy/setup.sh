@@ -55,6 +55,8 @@ db = {"host": "postgres", "port": 5432, "dbname": "centerline"}
 app = {**db, "user": "centerline_app", "password_file": "secrets/postgres-app-password"}
 timebase = {"base_url": "http://10.156.116.179:4516", "dataset": "dressings", "timeout_s": 60, "auth": {"type": "none"}}
 SCANNER = {"type": "clamd", "host": "clamav", "port": 3310, "timeout_s": 60}  # the clamav container (ADR-0031)
+# The ollama container (ADR-0041); the model is pulled once (deploy/README.md), then pinned by its digest
+AI = {"enabled": True, "url": "http://ollama:11434", "model": "qwen3.5:4b", "model_digest": None, "timeout_s": 30, "num_ctx": 4096, "warm_every_s": 60, "open_every_s": 2, "summary_every_s": 2, "embed_model": "bge-m3", "embed_model_digest": None, "embed_every_s": 10, "translate_every_s": 20, "translate_timeout_s": 180}
 if os.path.exists(dev):
     timebase = json.load(open(dev, encoding="utf-8")).get("timebase") or timebase
 files = {
@@ -68,6 +70,8 @@ files = {
         "migrate_database": {**db, "user": "centerline", "password_file": "secrets/postgres-password"},
         "auth": {"trusted_proxies": ["proxy"], "operator_workstations": []},
         "scanner": SCANNER,
+        "backup_status": "/app/backups/status.json",  # the backup agent's, mounted read-only (ADR-0038)
+        "ai": AI,
     },
     "monitor-core.json": {"database": app, "config_dir": ".", "instance": "centerline-docker", "journal_dir": "/app/data/journal"},
     "notifier.json": {"database": app, "config_dir": ".", "instance": "centerline-docker"},
@@ -91,12 +95,22 @@ for name, content in files.items():
 # An api.json from before ADR-0031 gets the scanner; nothing else in it changes
 path = os.path.join(dst, "api.json")
 api = json.load(open(path, encoding="utf-8"))
+added = []
 if "scanner" not in api:
     api["scanner"] = SCANNER
+    added.append("the malware scanner (clamav)")
+if "backup_status" not in api:
+    api["backup_status"] = "/app/backups/status.json"
+    added.append("the backups' status (for the health page)")
+if "ai" not in api:
+    api["ai"] = AI
+    added.append("the AI model (ollama)")
+if added:  # nothing else in it changes
     with open(path, "w", encoding="utf-8") as f:
         json.dump(api, f, indent=2)
         f.write("\n")
-    print("added    the malware scanner (clamav) to api.json")
+    for what in added:
+        print(f"added    {what} to api.json")
 EOF
 
 # The backups' folder, made here so Docker doesn't make it as root (ADR-0035). The sets hold every record and this
@@ -138,4 +152,23 @@ ENV
   echo "added    the backup settings to deploy/.env (no off-host folder yet)"
 fi
 
-echo "deploy/config is ready. Next: docker compose -f deploy/compose.yaml up -d --build (see deploy/README.md)"
+# The AI on the GPU and the simulator (ADR-0049), added once: deploy/compose.sh reads them
+if ! grep -q '^CENTERLINE_GPU=' "$repo/deploy/.env"; then
+  gpu=none
+  # Docker reaches an NVIDIA GPU when a container given one can list it (with an image already here: nothing pulled)
+  if docker image inspect pgvector/pgvector:pg17 >/dev/null 2>&1 \
+     && docker run --rm --pull never --gpus all pgvector/pgvector:pg17 nvidia-smi -L >/dev/null 2>&1; then
+    gpu=nvidia
+  fi
+  cat >> "$repo/deploy/.env" <<ENV
+
+# The AI model on the GPU (ADR-0049): nvidia when Docker reaches an NVIDIA GPU (setup.sh checks), none for the CPU
+# (slower: the AI's answers may miss their 30 s). deploy/compose.sh adds deploy/compose.gpu.yaml for nvidia.
+CENTERLINE_GPU=$gpu
+# The simulated line (deploy/compose.sim.yaml): on only away from the plant, never on the line
+CENTERLINE_SIMULATOR=off
+ENV
+  echo "added    CENTERLINE_GPU=$gpu and CENTERLINE_SIMULATOR=off to deploy/.env"
+fi
+
+echo "deploy/config is ready. Next: deploy/compose.sh up -d --build (see deploy/README.md)"

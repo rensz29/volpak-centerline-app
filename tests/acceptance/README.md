@@ -6,7 +6,14 @@ The URS v1.1 acceptance tests (§13) that the phase gates run, as automated pyte
   passed on 2026-10-06.
 - **AT-08's deterministic part, for gate G3** ([ADR-0031](../../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)): the OCAP library, the
   top three sections with their exact source, a Manager's guidance and the scanned uploads, with no AI running. Its
-  seven requirements passed on 2026-10-06. G3 also needs AT-08's AI part.
+  seven requirements passed on 2026-10-06.
+- **AT-08's AI part, for gate G3** ([ADR-0046](../../docs/decisions/ADR-0046-ai-summary-of-the-ocap.md)): the AI's bilingual questions and
+  its summary beside the exact source, shown only when grounded, with Ollama running and again with it stopped. AI-01,
+  AI-02, OCP-01, OCP-02, LAN-01, DAT-01 and WF-01 passed on 2026-10-09. "Running" is a stand-in answering as a correct
+  model would; set `CENTERLINE_AT08_OLLAMA` (and `CENTERLINE_AT08_MODEL`) to run the same flow against a real Ollama.
+- **AT-07, for gate G5** ([ADR-0036](../../docs/decisions/ADR-0036-storage-degraded-mode-and-at07.md)): offline core operation, the
+  journal's replay, storage degraded mode and restart recovery. DEP-02, DEP-03, RES-01, RES-02 and MNT-02 passed on
+  2026-10-07; DEP-05 waits for the control-room PC.
 - **AT-ANA-01…10, for gate G4**, on an independently calculated dataset
   ([ADR-0029](../../docs/decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md),
   [../fixtures/analytics](../fixtures/analytics/README.md)). ANA-01…21 all passed on 2026-10-06.
@@ -52,7 +59,8 @@ Each test names the requirements it shows with `@pytest.mark.urs(...)`.
 | | WF-02 | A finished request isn't asked again in its shift; the next shift's comes at the operator's sign-in |
 | | WF-03 | A request still open after 15 min alerts Management once |
 | | SES-05 | A request closes when its mismatch is resolved or superseded, so the browser drops the unsent text |
-| [AT-08](test_at08_ocap_deterministic.py), deterministic part: top three approved OCAP sections, the exact source, the path without AI | OCP-01, OCP-02, WF-01, AI-01 | monitor-core judges a mismatch; after the reason and answers, up to three Active sections are offered, best first, a Draft never. The operator reads the chosen one exactly as it was read from the file, and the file byte for byte, then acknowledges it. No model runs |
+| [AT-08](test_at08_ocap_deterministic.py), deterministic part: top three approved OCAP sections, the exact source, the path without AI | OCP-01, OCP-02, WF-01, AI-01 | monitor-core judges a mismatch; after the reason and answers, up to three Active sections are offered, best first, a Draft never. The operator reads the chosen one exactly as it was read from the file, and the file byte for byte, then acknowledges it. A reason picked from an Excel OCAP's rows offers that row alone, with its exact source ([ADR-0039](../../docs/decisions/ADR-0039-excel-ocaps-and-picked-reasons.md)). No model runs |
+| [AT-08](test_at08_ocap_ai.py), AI part: Ollama bilingual grounded help, top three OCAPs, exact source, deterministic fallback | AI-01, AI-02, OCP-01, OCP-02, LAN-01, DAT-01, WF-01 | monitor-core judges a mismatch; with Ollama running, the AI's opening and one clarification come in English and Tagalog, a Taglish reason is kept as typed, the top three Active sections are offered with the AI's bilingual summary citing only them, beside the exact source; a summary citing a section not offered, or another section's instruction, is never shown; with Ollama stopped, the fixed questions and the sections alone, every step done. Every call is kept with its digest and prompt version |
 | | OCP-03 | A Manager uploads PDF and Word versions and activates them with no second approval, keeping the earlier one or retiring it; each step is audited |
 | | GDE-01, WF-01 | None apply: a Manager guides with one file and keeps the guidance as a reusable OCAP, which the next mismatch with those words is offered |
 | | SEC-01 | Every upload is scanned first: an infected OCAP or guidance file is refused and audited, and with no scanner answering nothing is saved |
@@ -60,6 +68,11 @@ Each test names the requirements it shows with `@pytest.mark.urs(...)`.
 | | NOT-03, NOT-06 | A Teams outage doesn't hold up email; a replayed step is still one message; what the relay accepted is never sent again |
 | | NOT-04, NOT-05 | Retries at 30 s, 1, 5, then every 15 min for 24 h; then a permanent failure, re-driven only by an Administrator with a reason |
 | | NOT-07 | Routing by type and severity per channel; only Administrators send TEST messages |
+| [AT-07](test_at07_resilience.py): offline core operation, buffer replay, storage degraded mode, restart recovery | DEP-02, DEP-03 | With Timebase out of reach, no notifier and no AI, monitor-core judges a mismatch without the api; the operator signs in and runs the reason workflow to the end; the OCAP library answers; the audit chain holds; the notice waits in the outbox |
+| | RES-01 | An outage journals each step to a 0600 file and replays them in order; a replay cut short runs again with no duplicate; past 30 min judging pauses and nothing judged is lost |
+| | RES-02 | 80 % warns, 90 % runs the cleanup, still 90 % after 10 min is degraded mode: uploads refused (507), no brief changes or query log, monitoring and notifications carry on, an alert each hour; under 85 % it ends and says so |
+| | MNT-02 | After a restart open events carry on, delays start from zero, and no first notice is sent twice |
+| | DEP-05 | Skipped: starting after a Windows restart without anyone signed in needs the control-room PC (G0b) |
 | [AT-ANA-01](test_at_ana_analytics.py): the variables, optional shift, different X and Y | ANA-01, -04, -05 | The zones' actuals and setpoints (ADR-0009); X ≠ Y; shift All or one; no SKU (ADR-0027) |
 | AT-ANA-02: six buckets, three aggregations, 1-minute Average by default | ANA-06, -07 | All 18 bucket × aggregation results match the independent ones |
 | AT-ANA-03: exclusion counts, no zero substitution | ANA-08, -09 | One sample of each excluded kind counted by reason, a 185 s data gap; missing buckets absent, never 0 |
@@ -81,13 +94,13 @@ Each test names the requirements it shows with `@pytest.mark.urs(...)`.
 - **AT-ANA-06's and AT-ANA-10's look on the page.** The tooltips, zoom, pan and reset of the two tabs, and the
   wording as shown, are checked in a browser; the suite shows the data and the code they come from. Exports (also
   AT-ANA-10) wait for O-04.
-- **AT-08's AI part.** The clarification questions, the summary beside the source, translation and embedding search
-  come with the ai-worker once the model is chosen (O-01). Then AT-08 runs with Ollama up and again with it stopped.
-  The sample OCAPs are generated (`services/api/tests/ocap_samples.py`): the plant's real ones are needed before G3.
+- **AT-08 with the chosen model.** Its AI part runs on a stand-in for Ollama; the run against the real model on the
+  control-room PC (`CENTERLINE_AT08_OLLAMA`) is O-01's evidence. Embedding search isn't built: retrieval is keyword
+  search. The sample OCAPs are generated (`services/api/tests/ocap_samples.py`): the plant's real ones are needed before G3.
   Scanning uses a stand-in for clamd. The real one is checked by `services/api/tests/test_ocap_units.py` with
   `CENTERLINE_TEST_CLAMD` set.
 - **The other suites:**
   - AT-01…03: tested in `services/monitor_core/tests` for G1;
-  - AT-07: Phase 5.
+  - AT-07's restore drill (BKP-02): `deploy/restore.sh`, each quarter on a clean machine ([deploy/README.md](../../deploy/README.md#backups-and-restore)).
 
   They move here as their gates come.

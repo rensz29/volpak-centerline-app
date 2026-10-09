@@ -22,7 +22,7 @@ const SEARCH_AFTER_MS = 300
 
 /**
  * The OCAP library (OCP-01…03, ADR-0031): every role reads and searches the Active versions; any Manager uploads a
- * PDF or Word file as a Draft, checks the sections it was read into, and activates it, or suspends one.
+ * PDF, Word or Excel file as a Draft, checks the sections it was read into, and activates it, or suspends one.
  */
 export function OcapLibraryPage() {
   const { isManager } = useRoles()
@@ -66,7 +66,7 @@ export function OcapLibraryPage() {
     <div className="flex flex-col gap-5">
       <PageHeader
         title="OCAP library"
-        description="The out-of-control action plans. After an operator's reason, the Active versions' sections that match it are offered, with their pages; a Manager guides when none apply."
+        description="The out-of-control action plans. After an operator's reason, the Active versions' sections that match it are offered, with their pages or rows; an Excel OCAP's rows are also the reasons operators pick. A Manager guides when none apply."
         breadcrumbs={[{ label: 'Alarms' }, { label: 'OCAP library' }]}
         actions={
           isManager ? (
@@ -119,7 +119,7 @@ export function OcapLibraryPage() {
       ) : documents.length === 0 ? (
         <div className="bg-surface border-line shadow-card rounded-lg border">
           <EmptyState icon={BookOpen} title="No OCAPs yet"
-                      description={isManager ? 'Upload the plant’s OCAPs as PDF or Word files; each is a Draft until you activate it.'
+                      description={isManager ? 'Upload the plant’s OCAPs as PDF, Word or Excel files; each is a Draft until you activate it.'
                                              : 'A Manager uploads the plant’s OCAPs here.'} />
         </div>
       ) : (

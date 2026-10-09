@@ -1,10 +1,13 @@
-import type { OcapHit, OcapListing, OcapSection, OcapUpload, OcapVersion } from '@/types/ocapApi'
+import type { OcapHit, OcapListing, OcapSection, OcapUpload, OcapVersion, ReasonDirection } from '@/types/ocapApi'
 
 import { json, request } from './http'
 
 /** The api refuses larger files (ADR-0031). */
 export const MAX_FILE_BYTES = 20_000_000
-export const ACCEPT = '.pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+export const ACCEPT = [
+  '.pdf', '.docx', '.xlsx', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+].join(',')
 
 /** A chosen file as base64, the way the api takes uploads. */
 export function readBase64(file: File): Promise<string> {
@@ -53,5 +56,24 @@ export const ocapApi = {
 
   suspend(id: string, reason: string): Promise<OcapVersion> {
     return request<OcapVersion>(`/api/v1/ocaps/versions/${id}/suspend`, json('POST', { reason }))
+  },
+
+  /** The plant's checked Tagalog version of an OCAP version, a Draft (ADR-0044); returns the version */
+  addTranslation(versionId: string, body: { source: string; contentBase64: string; reason: string }): Promise<OcapVersion> {
+    return request<OcapVersion>(`/api/v1/ocaps/versions/${versionId}/translations`, json('POST', { language: 'fil', ...body }))
+  },
+
+  /** Show a Tagalog version to operators, or stop showing it; returns its OCAP version */
+  setTranslation(id: string, action: 'activate' | 'withdraw', reason: string): Promise<OcapVersion> {
+    return request<OcapVersion>(`/api/v1/ocaps/translations/${id}/${action}`, json('POST', { reason }))
+  },
+
+  translationUrl(id: string): string {
+    return `/api/v1/ocaps/translations/${id}/original`
+  },
+
+  /** Which HMI mismatches offer an Excel row as a reason (ADR-0039); returns its version */
+  tagReason(sectionId: string, body: { parameterIds: string[]; direction: ReasonDirection; reason: string }): Promise<OcapVersion> {
+    return request<OcapVersion>(`/api/v1/ocaps/sections/${sectionId}/reason`, json('POST', body))
   },
 }

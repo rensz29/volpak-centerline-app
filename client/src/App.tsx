@@ -19,6 +19,7 @@ import { AccountsPage } from '@/pages/AccountsPage'
 import { ChangePasswordPage } from '@/pages/ChangePasswordPage'
 import { ConfigurationSetupPage } from '@/pages/ConfigurationSetupPage'
 import { EventHistoryPage } from '@/pages/EventHistoryPage'
+import { HealthPage } from '@/pages/HealthPage'
 import { LiveCenterlinePage } from '@/pages/LiveCenterlinePage'
 import { MaintenancePage } from '@/pages/MaintenancePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
@@ -79,6 +80,7 @@ function SignedInApp() {
             <Route path={ROUTES.accounts} element={<Only roles={['ADMINISTRATOR']}><AccountsPage /></Only>} />
             <Route path={ROUTES.maintenance} element={<Only roles={PRIVILEGED}><MaintenancePage /></Only>} />
             <Route path={ROUTES.notifications} element={<Only roles={PRIVILEGED}><NotificationsPage /></Only>} />
+            <Route path={ROUTES.health} element={<Only roles={['ADMINISTRATOR']}><HealthPage /></Only>} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
         </Routes>

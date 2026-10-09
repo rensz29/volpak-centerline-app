@@ -1,10 +1,15 @@
 """The reason workflow (WF-01…03, ADR-0025, ADR-0031): each HMI mismatch asks that shift's operator why.
 
 A request moves through its steps in order:
-1. the operator's reason, in English or Filipino, kept as typed;
-2. answers to the follow-up questions in effect (none: this step is skipped);
+1. the operator's reason: picked from the Excel OCAP rows offered for the mismatch's parameter and direction, with an
+   optional note, or typed in English or Filipino and kept as typed (ADR-0039);
+2. answers to the follow-up questions: at most two the local model writes from the OCAP sections for the reason, or,
+   when it's off, slow or wrong, the fixed ones in effect (none: this step is skipped); a request keeps the questions it
+   asked (ADR-0041). Before the reason, the model has asked the opening question, from the OCAP rows for the mismatch
+   (ADR-0042, ai/opening.py);
 3. up to three OCAP sections that match the event and what was written, for the operator to choose one or "None of
-   these apply" (OCP-01); with no match the request goes straight on;
+   these apply" (OCP-01); with no match the request goes straight on. A reason picked from an OCAP offers its own
+   section only;
 4. with no OCAP chosen, a Manager's guidance: text, one optional PDF or Word attachment, and maybe kept as a reusable
    OCAP (GDE-01);
 5. the operator's acknowledgment of the chosen section or of the guidance: review only (OCP-02).
@@ -16,6 +21,7 @@ the api records each step. An operator answers only their own shift's requests. 
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 import re
 from uuid import UUID
 
@@ -31,10 +37,14 @@ from ..config import audit
 from ..config.audit import iso
 from ..config.models import _Camel
 from ..config.versioning import reason_errors
+from ..ai import calls as ai_calls
+from ..ai import questions as ai_questions
 from ..database import connect
 from ..ocap.parse import MAX_BYTES
+from ..ocap.choices import direction_of
 from ..ocap.store import CODE, LANGUAGES, OcapStore, checked_file, decode_upload
 from ..problems import Problem
+from ..storage import refuse_uploads
 
 router = APIRouter(prefix="/api/v1", tags=["workflow"])
 
@@ -43,7 +53,7 @@ NEXT = {"waiting_reason": "reason", "waiting_answers": "answers", "waiting_ocap"
         "waiting_acknowledgment": "acknowledgment"}
 BASE64_MAX = (MAX_BYTES * 4) // 3 + 8
 EXCERPT = 280
-COLUMNS = """r.id, r.event_id, r.status, r.created_at, r.escalated_at, r.closed_at, s.code AS shift_code, s.starts_at,
+COLUMNS = """r.id, r.event_id, r.status, r.created_at, r.updated_at, r.escalated_at, r.closed_at, s.code AS shift_code, s.starts_at,
              s.ends_at, s.production_date, e.kind, e.parameter_id, e.zone_id, e.opened_at, e.raw_hmi,
              e.raw_target, st.open AS event_open, st.state AS event_state"""
 FROM = """FROM workflow_request r JOIN shift_instance s ON s.id = r.shift_instance_id
@@ -52,6 +62,12 @@ FROM = """FROM workflow_request r JOIN shift_instance s ON s.id = r.shift_instan
 
 class TextIn(_Camel):
     text: str = Field(max_length=TEXT_MAX)
+
+
+class ReasonIn(_Camel):
+    text: str = Field("", max_length=TEXT_MAX, description="A reason typed by the operator")
+    section_id: UUID | None = Field(None, description="Or one of the request's `choices` (ADR-0039)")
+    note: str = Field("", max_length=TEXT_MAX, description="With a picked reason: anything to add")
 
 
 class AnswersIn(_Camel):
@@ -101,11 +117,13 @@ def _entry(e: dict, sections: dict, attachments: dict) -> dict:
 
 
 def _view(r: dict, entries: list[dict], names: dict, offered: list | None = None, sections: dict | None = None,
-          attachments: dict | None = None) -> dict:
+          attachments: dict | None = None, choices: list | None = None, asked: list | None = None,
+          summary: dict | None = None) -> dict:
     ch = f"{r['parameter_id']}.{r['zone_id']}"
     zone = names.get(ch, {})
     shift = shifts.Shift(r["shift_code"], r["starts_at"], r["ends_at"], r["production_date"])
     return {"id": str(r["id"]), "status": r["status"], "next": NEXT.get(r["status"]), "createdAt": iso(r["created_at"]),
+            "updatedAt": iso(r["updated_at"]),
             "escalatedAt": iso(r["escalated_at"]), "closedAt": iso(r["closed_at"]),
             "shift": {"code": shift.code, "label": shifts.label(shift), "startsAt": iso(shift.starts_at), "endsAt": iso(shift.ends_at)},
             "event": {"id": str(r["event_id"]), "channel": ch, "parameterId": r["parameter_id"], "zoneId": r["zone_id"],
@@ -113,8 +131,20 @@ def _view(r: dict, entries: list[dict], names: dict, offered: list | None = None
                       "openedAt": iso(r["opened_at"]), "hmi": _num(r["raw_hmi"]),
                       "target": _num(r["raw_target"]), "open": r["event_open"], "state": r["event_state"]},
             "offered": [{**{k: v for k, v in (sections or {}).get(o["section_id"], {}).items() if k != "body"},
-                         "rank": o["rank"], "score": round(float(o["score"]), 4),
+                         "rank": o["rank"], "score": round(float(o["score"]), 4), "method": o["method"],
                          "excerpt": (sections or {}).get(o["section_id"], {}).get("body", "")[:EXCERPT]} for o in offered or []],
+            # While it waits for the reason: the OCAP rows the operator can pick it from (ADR-0039)
+            "choices": choices or [],
+            # The follow-up questions it asked, and who wrote them (ADR-0041); None before the reason
+            "asked": [{"question": q["question"], "questionFil": q["fil"], "by": q["by"]} for q in asked or [] if q["ordinal"] > 0] or None,
+            # The first question, asked as soon as it opened: the AI's or the fixed one (ADR-0042); None until written
+            "opening": next(({"question": q["question"], "questionFil": q["fil"], "by": q["by"]} for q in asked or [] if q["ordinal"] == 0),
+                            None),
+            # The AI's summary of the sections offered, citing some of them (OCP-02, ADR-0046); None without one
+            "summary": None if summary is None else {
+                "text": summary["summary"], "textFil": summary["summary_fil"], "at": iso(summary["at"]), "by": "ai",
+                "sections": [{"sectionId": str(i), "citation": (sections or {}).get(i, {}).get("citation")} for i in summary["section_ids"]]},
+            "summaryTried": summary is not None or bool(r.get("summary_tried")),
             "entries": [_entry(e, sections or {}, attachments or {}) for e in entries]}
 
 
@@ -137,7 +167,8 @@ def _views(conn, rows: list[dict], names: dict) -> list[dict]:
     entries = _entries(conn, ids)
     offered: dict = {}
     if ids:
-        for o in conn.execute("SELECT request_id, rank, section_id, score FROM ocap_recommendation WHERE request_id = ANY(%s) ORDER BY rank",
+        for o in conn.execute("""SELECT request_id, rank, section_id, score, method FROM ocap_recommendation
+                                  WHERE request_id = ANY(%s) ORDER BY rank""",
                               (ids,)):
             offered.setdefault(o["request_id"], []).append(o)
     wanted = {o["section_id"] for os_ in offered.values() for o in os_}
@@ -149,7 +180,34 @@ def _views(conn, rows: list[dict], names: dict) -> list[dict]:
                    for a in (conn.execute("""SELECT id, entry_id, name, media_type, length(content) AS size, scan
                                                FROM workflow_attachment WHERE entry_id = ANY(%s)""", (entry_ids,))
                              if entry_ids else [])}
-    return [_view(r, entries.get(r["id"], []), names, offered.get(r["id"]), sections, attachments) for r in rows]
+    found: dict = {}
+
+    def choices(r: dict) -> list:
+        if r["status"] != "waiting_reason":
+            return []
+        key = (r["parameter_id"], direction_of(r["raw_hmi"], r["raw_target"]))
+        if key not in found:
+            found[key] = OcapStore.choices(conn, *key)
+        return found[key]
+
+    asked = _asked(conn, ids)
+    summaries = {x["request_id"]: x for x in conn.execute("SELECT * FROM workflow_summary WHERE request_id = ANY(%s)", (ids,))} if ids else {}
+    tried = {x["request_id"] for x in conn.execute("""SELECT DISTINCT request_id FROM ai_call WHERE purpose = 'summary'
+                                                       AND request_id = ANY(%s)""", (ids,))} if ids else set()
+    return [_view(r | {"summary_tried": r["id"] in tried}, entries.get(r["id"], []), names, offered.get(r["id"]), sections, attachments,
+                  choices(r), asked.get(r["id"]), summaries.get(r["id"]))
+            for r in rows]
+
+
+def _asked(conn, ids: list) -> dict:
+    """Each request's follow-up questions, in order, with who wrote them ("ai" or "fixed")."""
+    out: dict = {}
+    if ids:
+        for q in conn.execute("""SELECT request_id, ordinal, question, question_fil, asked_by FROM workflow_question
+                                  WHERE request_id = ANY(%s) ORDER BY ordinal""", (ids,)):
+            out.setdefault(q["request_id"], []).append({"ordinal": q["ordinal"], "question": q["question"], "fil": q["question_fil"],
+                                                        "by": q["asked_by"]})
+    return out
 
 
 def requests_of_event(conn, event_id, names: dict) -> list[dict]:
@@ -172,13 +230,40 @@ def list_requests(request: Request, conn=Depends(connect)) -> dict:
                                  ORDER BY r.closed_at IS NOT NULL, r.created_at DESC LIMIT 200""", (now,)).fetchall()
     views = _views(conn, rows, _names(request, conn))
     counts = {step: sum(1 for v in views if v["next"] == step) for step in NEXT.values()}
-    return {"requests": views, "questions": questions(conn), "counts": counts,
+    return {"requests": _waiting_for_opening(request, views, now), "questions": questions(conn), "counts": counts,
+            "aiOpening": _ai_opens(request),
             "shift": {"code": current.code, "label": shifts.label(current), "endsAt": iso(current.ends_at)}}
 
 
 @router.get("/workflow/requests/{request_id}", dependencies=[SIGNED_IN], summary="One request, with everything written on it")
 def get_request(request_id: UUID, request: Request, conn=Depends(connect)) -> dict:
     return _one(conn, request_id, _names(request, conn))
+
+
+OPENING_WAIT_S = 45  # how long the chat waits for the AI's opening question before asking the fixed one (ADR-0042)
+SUMMARY_WAIT_S = 60  # how long the chat says the AI's summary is on its way (ADR-0046)
+
+
+def _ai_opens(request: Request) -> bool:
+    ai = request.app.state.settings.ai
+    return bool(ai.enabled and ai.model and ai.open_every_s > 0)
+
+
+def _ai_summarises(request: Request) -> bool:
+    ai = request.app.state.settings.ai
+    return bool(ai.enabled and ai.model and ai.summary_every_s > 0)
+
+
+def _waiting_for_opening(request: Request, views: list[dict], now) -> list[dict]:
+    """Each view says whether its AI opening question, or its AI summary, is still on its way: worth a few seconds' wait
+    in the chat."""
+    opens, sums = _ai_opens(request), _ai_summarises(request)
+    for v in views:
+        age = (now - datetime.fromisoformat(v["createdAt"].replace("Z", "+00:00"))).total_seconds()
+        v["openingPending"] = opens and v["opening"] is None and v["next"] == "reason" and age < OPENING_WAIT_S
+        moved = (now - datetime.fromisoformat(v["updatedAt"].replace("Z", "+00:00"))).total_seconds()
+        v["summaryPending"] = sums and not v["summaryTried"] and v["next"] == "ocap" and bool(v["offered"]) and moved < SUMMARY_WAIT_S
+    return views
 
 
 def _one(conn, request_id, names: dict) -> dict:
@@ -207,7 +292,7 @@ def _locked(conn, request_id, step: str, operator: bool, now) -> dict:
     return r
 
 
-def _text(body: TextIn, what: str) -> str:
+def _text(body: TextIn | ReasonIn, what: str) -> str:
     text = body.text.strip()
     if not text:
         raise Problem(422, "invalid", f"Write the {what}", f"The {what} can't be empty", errors=[{"field": "text", "message": f"Write the {what}"}])
@@ -221,22 +306,63 @@ def _add(conn, request_id, kind: str, by: str, body: str, now, question: str | N
     return eid
 
 
+def _query(zone: dict, r: dict, written: list[str]) -> str:
+    """What the keyword search looks for: the zone, the direction of the change, and what the operator wrote."""
+    direction = None
+    if r["raw_hmi"] is not None and r["raw_target"] is not None:
+        direction = "high above higher increased" if r["raw_hmi"] > r["raw_target"] else "low below lower decreased"
+    return " ".join(x for x in [zone.get("parameterName"), zone.get("zoneName"), "HMI setpoint", direction, *written] if x)
+
+
+def _meaning(written: list[str]) -> str:
+    """What the search by meaning compares (ADR-0048): only what the operator wrote. The keyword search carries the
+    sealer and the direction; here they'd outweigh the reason, as they do there."""
+    return "\n".join(written)
+
+
+def _ask(request: Request, conn, request_id, now) -> list[str]:
+    """The request's follow-up questions, kept with it: the local model's, from the OCAP sections for the reason (the
+    picked row, or the three a typed reason finds), or the fixed ones in effect (AI-01, AI-02, ADR-0041)."""
+    r = conn.execute("""SELECT e.parameter_id, e.zone_id, e.raw_hmi, e.raw_target FROM workflow_request q
+                          JOIN event e ON e.id = q.event_id WHERE q.id = %s""", (request_id,)).fetchone()
+    reason = conn.execute("""SELECT body, ocap_section_id FROM workflow_entry WHERE request_id = %s AND kind = 'reason'
+                              ORDER BY seq DESC LIMIT 1""", (request_id,)).fetchone()
+    zone = _names(request, conn).get(f"{r['parameter_id']}.{r['zone_id']}", {})
+    store = request.app.state.ocap_store
+    if reason["ocap_section_id"] is not None:
+        sections = list(store.sections(conn, [reason["ocap_section_id"]]).values())
+    else:
+        sections = store.search(conn, _query(zone, r, [reason["body"]]), limit=ai_questions.MAX_SECTIONS,
+                                meaning=_meaning([reason["body"]]))
+    ai, call_id = ai_questions.ask(request.app.state.settings.ai, conn, request_id, ai_calls.alarm_text(zone, r), reason["body"],
+                                   sections, now)
+    rows = [(en, fil, "ai", call_id) for en, fil in ai] or [(q, None, "fixed", None) for q in questions(conn)]
+    for i, (q, fil, by, cid) in enumerate(rows, start=1):
+        conn.execute("""INSERT INTO workflow_question (request_id, ordinal, question, question_fil, asked_by, ai_call_id, at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)""", (request_id, i, q, fil, by, cid, now))
+    return [q for q, _, _, _ in rows]
+
+
 def _offer(request: Request, conn, request_id, now) -> str:
     """After the reason and the answers: up to three OCAP sections to choose from (OCP-01), found by the event's zone
     and direction and by what was written; or, with none, straight on to a Manager's guidance."""
     r = conn.execute("""SELECT e.parameter_id, e.zone_id, e.raw_hmi, e.raw_target FROM workflow_request q
                           JOIN event e ON e.id = q.event_id WHERE q.id = %s""", (request_id,)).fetchone()
     zone = _names(request, conn).get(f"{r['parameter_id']}.{r['zone_id']}", {})
+    picked = conn.execute("""SELECT e.ocap_section_id FROM workflow_entry e JOIN ocap_section s ON s.id = e.ocap_section_id
+                               JOIN ocap_version_status st ON st.version_id = s.version_id AND st.status = 'active'
+                              WHERE e.request_id = %s AND e.kind = 'reason'""", (request_id,)).fetchone()
+    if picked is not None:  # the reason came from an OCAP row: that row, and no search (ADR-0039)
+        conn.execute("""INSERT INTO ocap_recommendation (request_id, rank, section_id, score, method, query, at)
+                        VALUES (%s, 1, %s, 1, 'reason', 'The reason picked', %s)""", (request_id, picked["ocap_section_id"], now))
+        return "waiting_ocap"
     written = [e["body"] for e in conn.execute("""SELECT body FROM workflow_entry WHERE request_id = %s
                                                      AND kind IN ('reason', 'answer') ORDER BY seq""", (request_id,))]
-    direction = None
-    if r["raw_hmi"] is not None and r["raw_target"] is not None:
-        direction = "high above higher increased" if r["raw_hmi"] > r["raw_target"] else "low below lower decreased"
-    query = " ".join(x for x in [zone.get("parameterName"), zone.get("zoneName"), "HMI setpoint", direction, *written] if x)
-    hits = request.app.state.ocap_store.search(conn, query, limit=3)
+    query = _query(zone, r, written)
+    hits = request.app.state.ocap_store.search(conn, query, limit=3, meaning=_meaning(written))
     for rank, h in enumerate(hits, start=1):
         conn.execute("""INSERT INTO ocap_recommendation (request_id, rank, section_id, score, method, query, at)
-                        VALUES (%s, %s, %s, %s, 'keyword', %s, %s)""", (request_id, rank, h["sectionId"], h["score"], query, now))
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)""", (request_id, rank, h["sectionId"], h["score"], h["method"], query, now))
     return "waiting_ocap" if hits else "waiting_guidance"
 
 
@@ -250,12 +376,25 @@ def _now(conn):
     return conn.execute("SELECT clock_timestamp() AS t").fetchone()["t"]
 
 
-@router.post("/workflow/requests/{request_id}/reason", dependencies=[OPERATOR_ONLY], summary="The operator's reason (WF-01)")
-def give_reason(request_id: UUID, body: TextIn, request: Request, conn=Depends(connect)) -> dict:
+@router.post("/workflow/requests/{request_id}/reason", dependencies=[OPERATOR_ONLY],
+             summary="The operator's reason, typed or picked from the OCAP rows offered (WF-01, ADR-0039)")
+def give_reason(request_id: UUID, body: ReasonIn, request: Request, conn=Depends(connect)) -> dict:
     now = _now(conn)
     _locked(conn, request_id, "reason", True, now)
-    _add(conn, request_id, "reason", request.state.principal.username, _text(body, "reason"), now)
-    _move(conn, request_id, "waiting_answers" if questions(conn) else _offer(request, conn, request_id, now), now)
+    by = request.state.principal.username
+    if body.section_id is None:
+        _add(conn, request_id, "reason", by, _text(body, "reason"), now)
+    else:
+        e = conn.execute("""SELECT e.parameter_id, e.raw_hmi, e.raw_target FROM workflow_request r JOIN event e ON e.id = r.event_id
+                             WHERE r.id = %s""", (request_id,)).fetchone()
+        offered = {c["sectionId"]: c for c in OcapStore.choices(conn, e["parameter_id"], direction_of(e["raw_hmi"], e["raw_target"]))}
+        choice = offered.get(str(body.section_id))
+        if choice is None:
+            raise Problem(422, "not-offered", "That reason isn't offered", "Pick one of the reasons shown, or type your own",
+                          errors=[{"field": "sectionId", "message": "Not one of the reasons offered"}])
+        note = body.note.strip()
+        _add(conn, request_id, "reason", by, choice["label"] + (f"\n{note}" if note else ""), now, section=body.section_id)
+    _move(conn, request_id, "waiting_answers" if _ask(request, conn, request_id, now) else _offer(request, conn, request_id, now), now)
     conn.commit()
     return _one(conn, request_id, _names(request, conn))
 
@@ -265,7 +404,8 @@ def give_reason(request_id: UUID, body: TextIn, request: Request, conn=Depends(c
 def give_answers(request_id: UUID, body: AnswersIn, request: Request, conn=Depends(connect)) -> dict:
     now = _now(conn)
     _locked(conn, request_id, "answers", True, now)
-    asked = questions(conn)
+    # The questions this request asked; one from before ADR-0041 asks the fixed ones in effect
+    asked = [q["question"] for q in _asked(conn, [request_id]).get(request_id, []) if q["ordinal"] > 0] or questions(conn)
     answers = [a.strip() for a in body.answers]
     errors = [{"field": f"answers[{i}]", "message": "Answer the question"} for i in range(len(asked))
               if i >= len(answers) or not answers[i]]
@@ -303,6 +443,8 @@ def choose_ocap(request_id: UUID, body: OcapChoiceIn, request: Request, conn=Dep
 @router.post("/workflow/requests/{request_id}/guidance", dependencies=[MANAGER_ONLY],
              summary="A Manager's guidance when no OCAP applies: text, one optional file, maybe a reusable OCAP (GDE-01)")
 def give_guidance(request_id: UUID, body: GuidanceIn, request: Request, conn=Depends(connect)) -> dict:
+    if body.attachment is not None:
+        refuse_uploads(conn)  # protected degraded mode (RES-02): the guidance's text still goes through without a file
     now = _now(conn)
     _locked(conn, request_id, "guidance", False, now)
     text = _text(body, "guidance")

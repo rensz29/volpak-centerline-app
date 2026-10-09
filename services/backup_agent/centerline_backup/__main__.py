@@ -15,9 +15,14 @@ import signal
 import threading
 from datetime import datetime, timedelta, timezone
 
-from .agent import Agent, iso, load_settings, sets
+from .agent import Agent, BackupError, load_settings, sets
 
 log = logging.getLogger("centerline.backup")
+
+
+def next_due(now: datetime, minute: int) -> datetime:
+    due = (now + timedelta(hours=1)).replace(minute=minute, second=0, microsecond=0)
+    return due - timedelta(hours=1) if due - now > timedelta(hours=1) else due
 
 
 def serve(agent: Agent) -> None:
@@ -27,18 +32,25 @@ def serve(agent: Agent) -> None:
     s = agent.s
     log.info("backing up %s every hour to %s; off-host: %s", s.database.describe(), s.backup_dir,
              s.offhost_dir or "not set (CENTERLINE_BACKUP_OFFHOST in deploy/.env)")
+    present = sets(s.backup_dir)
+    now = datetime.now(timezone.utc)
+    # At start, a set now unless the last is recent; then a few minutes past each hour
+    due = now if not present or now - present[-1][0] >= timedelta(seconds=s.every_s - 300) else next_due(now, s.minute)
+    cleaned_for = None  # the storage episode (its "since") last cleaned for
     while not stop.is_set():
-        present = sets(s.backup_dir)
         now = datetime.now(timezone.utc)
-        # At start, a set now unless the last is recent; then a few minutes past each hour
-        if not present or now - present[-1][0] >= timedelta(seconds=s.every_s - 300):
+        if now >= due:
             agent.run_once()
-            now = datetime.now(timezone.utc)
-        due = (now + timedelta(hours=1)).replace(minute=s.minute, second=0, microsecond=0)
-        if due - now > timedelta(hours=1):
-            due -= timedelta(hours=1)
-        log.debug("next backup at %s", iso(due))
-        stop.wait((due - now).total_seconds())
+            due = next_due(datetime.now(timezone.utc), s.minute)
+        # Every minute: monitor-core at 90 % asks for the eligible cleanup, once per episode (RES-02)
+        try:
+            storage = agent.storage_state()
+            if storage and storage.get("state") in ("cleanup", "degraded") and storage.get("since") != cleaned_for:
+                agent.cleanup(storage)
+                cleaned_for = storage.get("since")
+        except BackupError as e:
+            log.debug("storage state unknown: %s", e)
+        stop.wait(max(1.0, min(60.0, (due - datetime.now(timezone.utc)).total_seconds())))
 
 
 def show(agent: Agent) -> None:

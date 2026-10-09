@@ -58,10 +58,11 @@ together — there is no denormalised copy that can drift out of step.
 | `/analytics` | **Analytics & Correlation** — parameter panel with X/Y axis assignment, scatter analysis with regression, trend comparison, 9 summary statistics, raw records table with CSV export |
 | `/alarms/active` | **Live.** Every open event, Criticals first, filtered by kind; each opens its evidence sheet, where a Manager acknowledges a Critical |
 | `/alarms/history` | **Live.** Every closed event, newest first, filtered by kind, zone and time, paged; Managers and Administrators export it as UTF-8 CSV |
-| `/reasons` | **Live.** Every HMI mismatch asks that shift's operator why ([ADR-0025](../docs/decisions/ADR-0025-shifts-and-reasons.md), [ADR-0031](../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)): the operator gives the reason and answers the follow-up questions; then the operator reads the matching OCAP sections in full and chooses one, or says none of them apply. Then the operator acknowledges the section, or the Manager's guidance (with its file, and optionally kept as a reusable OCAP); everyone else reads. Grouped as waiting for you, waiting for someone else, closed |
-| `/ocaps` | **Live.** The OCAP library ([ADR-0031](../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)): every role searches the Active versions (matches highlighted) and reads each version's sections with their pages, history and file. Managers upload a PDF or Word file as a Draft, check its sections, activate it (keeping or retiring the earlier version) or suspend it |
+| `/reasons` | **Live.** Every HMI mismatch asks that shift's operator why ([ADR-0025](../docs/decisions/ADR-0025-shifts-and-reasons.md), [ADR-0031](../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)): the operator picks the reason from the Excel OCAP rows offered for the mismatch's parameter and direction, or types it under Other ([ADR-0039](../docs/decisions/ADR-0039-excel-ocaps-and-picked-reasons.md)), and answers the follow-up questions; then the operator reads the picked row, or the OCAP sections matching a typed reason, in full and chooses one, or says none of them apply. Then the operator acknowledges the section, or the Manager's guidance (with its file, and optionally kept as a reusable OCAP); everyone else reads. Grouped as waiting for you, waiting for someone else, closed. For operators the same steps also come as a chat, the **Centerline assistant**, that opens by itself on every page with a short sound ([ADR-0040](../docs/decisions/ADR-0040-reason-assistant-chat.md)) |
+| `/ocaps` | **Live.** The OCAP library ([ADR-0031](../docs/decisions/ADR-0031-ocap-library-deterministic-path.md)): every role searches the Active versions (matches highlighted) and reads each version's sections with their pages, history and file. Managers upload a PDF, Word or Excel file as a Draft, check its sections (and which parameters an Excel row is offered for as a reason), add its checked Tagalog version ([ADR-0044](../docs/decisions/ADR-0044-checked-tagalog-ocap.md)) and, where the AI translation is on, see how far it got ([ADR-0045](../docs/decisions/ADR-0045-ai-translates-the-ocap.md)), activate it (keeping or retiring the earlier version) or suspend it |
 | `/maintenance` | **Live, Manager and Administrator.** Maintenance windows in force, coming and past; Administrators open them for the line or chosen zones, move their end, end them |
 | `/notifications` | **Live, Manager and Administrator.** Every message to Teams and email: how it was routed, each delivery's status and attempts, what was sent; Administrators send TEST messages and re-drive failures ([ADR-0023](../docs/decisions/ADR-0023-notifier.md)) |
+| `/health` | **Live, Administrator.** System health ([ADR-0038](../docs/decisions/ADR-0038-system-health-page.md)): a verdict, then every part graded OK, warning or critical (monitor-core and the broker, each area's messages, time to judge, the journal, the notifier and its channels, the outbox, the disk, the backups and their restore check, the off-host copy, the database and audit chain, the malware scanner's signatures, Timebase), each with what to do and a link; refreshed every 15 s |
 | `/accounts` | **Live, Administrator.** Every account with its roles and state; create one, change its roles or disable it, issue a temporary password |
 | `/configuration` | **Live, Manager and Administrator** (the Rules tab is the Manager's to change, the others the Administrator's). Connections: the MQTT broker and the Timebase historian, with Test and Save. Tags: the parameter register (parameters, zones, Timebase tags with their latest values) and its change history. Mappings: each tag's topic and field. Rules: each zone's target, limits and delays as versions. Notifications: who gets which messages, as versions; the Teams flow and the SMTP relay are on Connections. Reasons: the follow-up questions. Analytics ranges: what each parameter's values must lie within to count in Analytics, as versions |
 
@@ -249,6 +250,14 @@ ECharts 6 and load with the page. Start the api first (see
 
 The prototype's analytics page (`src/pages/AnalyticsPage.tsx`, `src/components/analytics/`)
 is no longer routed but is kept in the tree.
+
+## Storage banner
+
+Every page shows a bar under the header when monitor-core reports the disk 80 % full or more (`StorageBanner`, from the
+event counts every page polls): amber with the cleanup's deadline at 90 %, red in protected degraded mode, saying that
+uploads, brief-change records and the Analytics query log are paused until it's under 85 %
+([ADR-0036](../docs/decisions/ADR-0036-storage-degraded-mode-and-at07.md)). An upload refused then answers
+`507 storage-full`.
 
 ## Signing in
 

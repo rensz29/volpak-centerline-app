@@ -25,6 +25,7 @@ from ..config import audit
 from ..config.audit import iso
 from ..config.models import _Camel
 from ..database import connect
+from ..storage import storage as storage_state
 from ..problems import Problem
 from ..workflow.router import requests_of_event
 from .control import control_view
@@ -85,7 +86,8 @@ def live(request: Request, conn=Depends(connect)) -> dict:
             "instance": beat["instance"], "startedAt": iso(beat["started_at"]), "beatAt": iso(beat["beat_at"]),
             "ageS": round(float(beat["age"]), 1), "alive": alive,
             **{k: beat["status"].get(k) for k in ("judging", "reasons", "connected", "actualPaused", "stop",
-                                                   "warmupUntil", "rulesVersion", "mappingVersion", "registerVersion", "lastLive")}},
+                                                   "warmupUntil", "rulesVersion", "mappingVersion", "registerVersion", "lastLive",
+                                                   "storage")}},
         "parameters": parameters,
         "events": events,
         # Zones switched off and maintenance windows, from the database: shown even while monitor-core is down
@@ -168,7 +170,9 @@ def event_counts(conn=Depends(connect)) -> dict:
                                                   AND s.acknowledged_at IS NULL) AS unacknowledged
                           FROM event e JOIN event_state s ON s.event_id = e.id WHERE s.open""").fetchone()
     return {"open": r["hmi"] + r["warning"] + r["critical"], "hmi": r["hmi"], "warning": r["warning"],
-            "critical": r["critical"], "unacknowledgedCritical": r["unacknowledged"]}
+            "critical": r["critical"], "unacknowledgedCritical": r["unacknowledged"],
+            # Every page polls this: its storage banner comes from here (RES-02, ADR-0036)
+            "storage": storage_state(conn)}
 
 
 def _manila(t: datetime | None) -> str:

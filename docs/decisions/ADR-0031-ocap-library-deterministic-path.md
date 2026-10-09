@@ -1,6 +1,6 @@
 # ADR-0031: Phase 3 begins with the OCAP library and the deterministic path, before the AI model is chosen
 
-- **Status:** Accepted
+- **Status:** Accepted (amended by [ADR-0039](ADR-0039-excel-ocaps-and-picked-reasons.md): Excel OCAPs, and reasons picked from their rows)
 - **Date:** 2026-10-06
 - **Decider:** Szyrelle (system owner), on 2026-10-06: "lets dive in to your recommendation". Phase 3 starts with
   the OCAP library, its search without AI, the OCAP steps of the reason workflow and the Manager's attachments and
@@ -68,7 +68,8 @@
      the ai-worker and ollama once O-01 closes. Until then the follow-up questions stay the Administrator's two fixed
      ones.
    - **The Filipino interface (LAN-01).** Filipino OCAPs and text typed in Filipino work now; the screens follow in a
-     later slice, translated by someone fluent.
+     later slice, translated by someone fluent. (Since [ADR-0047](ADR-0047-interface-stays-english.md) the screens stay English;
+     Filipino is in the operator's chat and the OCAP's text.)
 
 ## Consequences
 

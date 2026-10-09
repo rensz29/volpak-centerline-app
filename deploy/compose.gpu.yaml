@@ -1,0 +1,18 @@
+# The AI model on an NVIDIA GPU (ADR-0041, ADR-0049): Ollama stays its own container, here and on the server.
+# deploy/compose.sh adds this file when deploy/.env has CENTERLINE_GPU=nvidia (setup.sh checks whether Docker reaches
+# the GPU), so every start keeps it:
+#
+#   deploy/compose.sh up -d ollama
+#
+# Docker reaches the GPU on Linux with the NVIDIA driver and the NVIDIA Container Toolkit, and on Windows through WSL2
+# with the NVIDIA driver; a Hyper-V VM only with the GPU passed through to it (ARCHITECTURE §3).
+
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

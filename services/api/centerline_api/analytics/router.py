@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from fastapi import APIRouter, Depends, Request
 
 from ..auth.deps import PRIVILEGED
 from ..database import connect
+from ..storage import degraded
 from . import ranges, service
 from .models import AnalyticsQuery
 
@@ -27,6 +30,9 @@ def get_options(request: Request, conn=Depends(connect)) -> dict:
 @router.post("/query", summary="Run one X/Y correlation over Timebase history")
 def post_query(query: AnalyticsQuery, request: Request, conn=Depends(connect)) -> dict:
     principal = getattr(request.state, "principal", None)
-    return service.run(query, request.app.state.settings, request.app.state.register, _ranges(request, conn),
+    settings = request.app.state.settings
+    if settings.audit_log and degraded(conn):
+        settings = replace(settings, audit_log=None)  # the query log stops in protected degraded mode (RES-02)
+    return service.run(query, settings, request.app.state.register, _ranges(request, conn),
                        client_host=request.client.host if request.client else None,
                        user=principal.username if principal else None)

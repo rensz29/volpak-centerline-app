@@ -42,7 +42,7 @@ def refused(conn, sql, *args) -> bool:
 
 
 def test_migrations_apply_once_and_refuse_an_edited_file(conn, tmp_path):
-    assert migrate.status(conn) == {"applied": ["0001_configuration", "0002_mappings", "0003_monitoring", "0004_accounts", "0005_monitoring_control", "0006_app_role", "0007_sku_placeholder", "0008_notifications", "0009_workflow", "0010_truncate_guards", "0011_no_sku", "0012_idempotency", "0013_analytics_ranges", "0014_ocap"], "pending": []}
+    assert migrate.status(conn) == {"applied": ["0001_configuration", "0002_mappings", "0003_monitoring", "0004_accounts", "0005_monitoring_control", "0006_app_role", "0007_sku_placeholder", "0008_notifications", "0009_workflow", "0010_truncate_guards", "0011_no_sku", "0012_idempotency", "0013_analytics_ranges", "0014_ocap", "0015_ocap_reason_choices", "0016_ai_questions", "0017_ai_opening", "0018_question_filipino", "0019_ocap_translations", "0020_ocap_ai_translation", "0021_ocap_summary", "0022_ocap_embeddings"], "pending": []}
     assert migrate.apply(conn) == []
     edited = tmp_path / "migrations"
     edited.mkdir()

@@ -57,7 +57,13 @@ Phase 1 UI prototype (`client/`) differs from the target.
 > beside it; the zone table below stays the full record ([ADR-0033](decisions/ADR-0033-line-view-3d.md)). On 2026-10-07 it became
 > the owner's Blender model of the SI-360 ([ADR-0034](decisions/ADR-0034-line-view-blender-model.md)), and **Phase 5 began with the
 > backups**: an hourly set kept here and off-host, checked by a daily restore, and a restore script
-> ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)).
+> ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)). Storage limits and protected degraded mode followed, and **AT-07 passes** but for
+> DEP-05, which needs the control-room PC ([ADR-0036](decisions/ADR-0036-storage-degraded-mode-and-at07.md)). The offline install kit
+> carries the images, ClamAV's signatures and the code to a PC without the internet ([ADR-0037](decisions/ADR-0037-offline-install-kit.md)), and
+> the System health page grades every part for Administrators ([ADR-0038](decisions/ADR-0038-system-health-page.md)).
+> On 2026-10-08 the plant's first OCAP arrived as an Excel workbook: the library now reads Excel row by row, and each row's
+> phenomenon is a **reason the operator picks** for an HMI mismatch instead of typing one, which then offers that row
+> ([ADR-0039](decisions/ADR-0039-excel-ocaps-and-picked-reasons.md)).
 
 ID conventions used throughout (same as the SDD):
 
@@ -201,8 +207,10 @@ broker is an input only; Centerline services never talk to each other through it
 | B. WSL2 + Docker Engine via boot task | Workable, soak test needed | Only with Win 11 mirrored networking (verify) | Yes (CUDA) | Fallback |
 | Docker Desktop | **No** — needs interactive login (breaks DEP-05); paid licence | — | — | **Rejected** |
 
-If the approved model needs a GPU: run Ollama on the Windows host, reachable only from the
-VM, and record it as a DEP-01 deviation.
+Ollama stays its own container in the stack, on the server as on the owner's laptop
+([ADR-0049](decisions/ADR-0049-production-runs-the-laptops-stack.md)): the host must give Docker the NVIDIA GPU (Linux with
+the NVIDIA Container Toolkit, WSL2, or a VM with the GPU passed through), and `deploy/compose.sh` adds the GPU file from
+`deploy/.env`. Ollama isn't installed on the Windows host.
 
 ---
 
@@ -245,9 +253,10 @@ volpak-digital-centerline/
 │  │                           control.py: zones switched off and maintenance windows (ADR-0017)
 │  │  ├─ notifications/        the Notifications log, TEST messages, re-drives (ADR-0023); routing is in config/
 │  │  ├─ ocap/                 the OCAP library (ADR-0031): scan.py (clamd), parse.py (PDF and Word into sections with
-│  │  │                        their pages), store.py (versions, statuses, the keyword search), router.py
+│  │  │                        their pages, Excel by rows), store.py (versions, statuses, the keyword search), choices.py
+│  │  │                        (the reasons Excel rows offer, ADR-0039), router.py
 │  │  └─ workflow/             the reason workflow: requests, their steps with the OCAP choice, the follow-up questions,
-│  │                           the guidance's file and reusable OCAP (ADR-0025, ADR-0031)
+│  │                           the guidance's file and reusable OCAP, reasons picked from OCAP rows (ADR-0025, 0031, 0039)
 │  ├─ notifier/centerline_notifier/   (built, ADR-0023) routing, one lane per channel, retries and leases, the
 │  │                           monitor-core watcher, its heartbeat; channels.py, routing.py, messages.py and outbox.py
 │  │                           are in common/ (the api uses them for TEST messages and re-drives)
@@ -277,7 +286,7 @@ volpak-digital-centerline/
 │  ├─ mqtt-sim/                simulated Volpak publisher for dev and G1 (local broker only)
 │  └─ notify-sink/             a local Teams flow and SMTP relay that keep what they receive (ADR-0023)
 ├─ tests/
-│  ├─ acceptance/              (built: AT-04…06, ADR-0028; AT-ANA-01…10, ADR-0029; AT-08's deterministic part, ADR-0031) AT-01 … AT-08, AT-ANA-01 … AT-ANA-10
+│  ├─ acceptance/              (built: AT-04…06, ADR-0028; AT-ANA-01…10, ADR-0029; AT-07, ADR-0036; AT-08, ADR-0031 and ADR-0046) AT-01 … AT-08, AT-ANA-01 … AT-ANA-10
 │  └─ fixtures/                (built, ADR-0029) analytics reference dataset + independent results
 └─ docs/
    ├─ ARCHITECTURE.md          this file
@@ -500,6 +509,17 @@ dropped: the provisional degraded mode until O-12 decides the rest.
 > - At the shift's end an unfinished request closes as not answered, and the next shift's operator
 >   gets a new one (O-11).
 > - The AI (clarification questions, summaries, translation) waits for its model (O-01).
+> - **Reasons picked from OCAP rows** ([ADR-0039](decisions/ADR-0039-excel-ocaps-and-picked-reasons.md)): an Excel OCAP's rows that name a phenomenon are offered as the reason,
+>   for the parameters and direction a Manager confirmed; "Other" is typed. A picked reason offers its own row in step 4.
+> - **The reason assistant** ([ADR-0040](decisions/ADR-0040-reason-assistant-chat.md)): for operators, a chat panel on every page opens by itself with a short sound when
+>   a request needs them, and asks the steps one at a time; the Reasons page keeps the full list.
+> - **The AI's follow-up questions** ([ADR-0041](decisions/ADR-0041-local-ai-follow-up-questions.md)): Ollama in the stack (trial model qwen3.5:4b, O-01 open) writes at most two
+>   questions from the OCAP sections for the reason; checked, kept with every call, and the fixed questions whenever it can't be used.
+> - **The AI opens the conversation** ([ADR-0042](decisions/ADR-0042-ai-opens-the-conversation.md)): as soon as a request is open it asks why, from the OCAP rows for the
+>   mismatch; the follow-ups are its own too, with or without OCAP sections; the fixed questions are only the fallback.
+> - **The chat in Tagalog** ([ADR-0043](decisions/ADR-0043-assistant-in-tagalog.md)): by default, with an English switch; the AI writes each question in both; the record stays English.
+> - **The OCAP in Tagalog** ([ADR-0044](decisions/ADR-0044-checked-tagalog-ocap.md)): the plant's checked translation, paired row by row and activated by a Manager; shown over the English.
+>   [ADR-0045](decisions/ADR-0045-ai-translates-the-ocap.md) adds the local AI's translation of English OCAPs behind checks, labelled as the AI's; with the trial model 5 of 18 sections pass, the rest stay English.
 
 1. **Request** — created with the event, or at session activation for mismatches still
    active from the previous shift. `UNIQUE (event_id, shift_instance_id)` blocks repeats.
@@ -531,7 +551,16 @@ dropped: the provisional degraded mode until O-12 decides the rest.
 > - **Versions:** a version is searched once a Manager activates it, with no second approval (OCP-03). It moves from
 >   Draft to Active, then to Suspended or Superseded.
 > - **Record:** the sections offered are kept with the request (`ocap_recommendation`, method `keyword`).
-> - **Generate and Verify** come with the ai-worker.
+> - **Generate and Verify** ([ADR-0046](decisions/ADR-0046-ai-summary-of-the-ocap.md)) run in the api, as a background job, not a separate
+>   ai-worker: the local model sums up the sections offered in English and Filipino, citing them by number; the summary
+>   is shown only if it cites nothing but those sections and names no number or instruction verb they don't have, and its
+>   Filipino only if it passes ADR-0045's checks. Every call is kept in `ai_call`, a summary that passed in `workflow_summary`.
+>   With the trial model, 13 of the plant workbook's 18 sections get a summary, 4 in Filipino too.
+> - **Index and Query by meaning** ([ADR-0048](decisions/ADR-0048-ocap-search-by-meaning.md)): bge-m3 (pinned, on the CPU) embeds the Active
+>   OCAPs' chunks into pgvector in a background job; a search merges the keyword ranking with the nearness to what the
+>   operator wrote (reciprocal rank fusion), so a Taglish reason finds its English section; keywords alone whenever the
+>   model can't be used. Built and deployed; waiting for bge-m3 to download.
+> - **Still to build:** the models' choice (O-01). Translating the reason for the search isn't needed with a multilingual embedding.
 
 | Stage | Design | URS |
 |---|---|---|
@@ -709,7 +738,7 @@ PostgreSQL 17+ with pgvector. All timestamps `timestamptz` in UTC.
 | Configuration | `config_version`, `parameter_rule` (per parameter, optional zone override), `tag_mapping_version`, `tag_mapping` (tag → topic + field), `analytics_range_version`, `analytics_range`, `routing_rule` | Versioned with content hash; immediate or scheduled activation; rollback reactivates an earlier version; `version` column for optimistic locking. **Built** ([ADR-0012](decisions/ADR-0012-rules-configuration-postgresql.md), [ADR-0013](decisions/ADR-0013-tag-mappings.md)): `config_version`, `parameter_rule` (a zone or every zone of the parameter; `sku_parameter_rule` until [ADR-0027](decisions/ADR-0027-no-sku.md)), `config_activation`, `mapping_version`, `tag_mapping`, `mapping_activation`, `register_version`, the Analytics-valid ranges `analytics_range_version`, `analytics_range` and `analytics_range_activation` ([ADR-0029](decisions/ADR-0029-analytics-ranges-and-g4-acceptance.md)), and the hash-chained `audit_log`, append-only by trigger. What was saved about SKUs before ADR-0027 stays in `legacy_*` columns that new rows can't fill |
 | Monitoring | `event`, `event_transition`, `event_state`, `lightweight_change`, `scheduled_action`, `pause_period` | UUIDv7 IDs from monitor-core; `lightweight_change` partitioned by month; `event_state` is a projection rebuildable from transitions. **Built** (migration 0003, [ADR-0014](decisions/ADR-0014-monitor-core.md)) with `notification` (the outbox), `event_acknowledgment` and `monitor_heartbeat`; partitioning comes when volumes need it |
 | Workflow | `shift_instance`, `workflow_request`, `operator_input`, `clarification`, `ocap_recommendation`, `acknowledgment`, `manager_guidance` | `UNIQUE (event_id, shift_instance_id)`. **Built** (migration 0009, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)): `shift_instance`, `workflow_request`, `workflow_entry` (the reason, answers, guidance and acknowledgment in one append-only table, in place of `operator_input`, `clarification`, `manager_guidance` and `acknowledgment`), `workflow_settings` (the follow-up questions, append-only). Migration 0014 ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) adds `ocap_recommendation` (the sections offered, with their score and method), the OCAP choice as a `workflow_entry`, and `workflow_attachment` (the guidance's file, scanned) |
-| OCAP | `ocap_document`, `ocap_version`, `ocap_section`, `ocap_chunk` | Status Draft / Active / Suspended / Superseded; chunk holds the embedding. **Built** (migration 0014, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)): each file byte for byte with its SHA-256 and scan verdict; sections with their headings and pages; chunks with a full-text `tsvector` (the embedding comes with the ai-worker); statuses in the append-only `ocap_status`, a row per change, read through `ocap_version_status`. Every table is append-only |
+| OCAP | `ocap_document`, `ocap_version`, `ocap_section`, `ocap_chunk` | Status Draft / Active / Suspended / Superseded; chunk holds the embedding. **Built** (migration 0014, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)): each file byte for byte with its SHA-256 and scan verdict; sections with their headings and pages (an Excel section: its sheet and rows, and the phenomenon it offers as a reason, with `ocap_reason_tag` saying for which parameters and direction, migration 0015, [ADR-0039](decisions/ADR-0039-excel-ocaps-and-picked-reasons.md)); chunks with a full-text `tsvector` (the embedding comes with the ai-worker); statuses in the append-only `ocap_status`, a row per change, read through `ocap_version_status`. Every table is append-only |
 | Notification | `notification`, `notification_delivery`, `delivery_attempt` | `dedup_key` unique. **Built** ([ADR-0023](decisions/ADR-0023-notifier.md)): also `notification_route` (the frozen routing), `routing_version`/`routing_activation`, `notifier_heartbeat`; a finished delivery can't change (NOT-06) |
 | Identity | `user_account`, `role`, `user_role`, `session`, `auth_event`, `password_history` | Argon2id hashes only. **Built** (migration 0004, [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)) as `app_user` (roles as an array; Operator alone), `app_user_login` (each sign-in name unique across kinds), `app_session` (token stored as SHA-256), `app_user_password`; sign-in events go to the hash-chained `audit_log` |
 | Governance | `audit_log`, `retention_policy`, `legal_hold`, `maintenance_window`, `backup_run` | `audit_log` **hash-chained**. **Built so far:** `audit_log` (0001); `maintenance_window` and the append-only `monitoring_switch` (0005, [ADR-0017](decisions/ADR-0017-monitoring-control.md)) |
@@ -920,7 +949,7 @@ redundancy. A single 4 h restore consumes a month's budget → keep a **pre-stag
 | Windows restart | Services start without login; timers restart from zero; no duplicate initial notifications | Automatic | DEP-05, MNT-02 |
 | Hardware failure | Monitoring stops | Restore to spare PC from off-host backup within 4 h | BKP-02 |
 
-**Protected degraded mode (proposed, O-12):** monitoring, events, workflow and
+**Protected degraded mode (O-12, built: [ADR-0036](decisions/ADR-0036-storage-degraded-mode-and-at07.md)):** monitoring, events, workflow and
 notifications continue; lightweight records, diagnostic logs and new uploads stop; an
 Administrator alert repeats until storage is fixed. Protected records are never deleted silently.
 
@@ -941,7 +970,8 @@ Administrator alert repeats until storage is fixed. Protected records are never 
   OCAP activation**.
 - Off-host repository keeps 30 daily + 12 monthly copies.
 - **Offline install kit** (image archives by digest, model files, installer, restore
-  runbook) stored with the backups.
+  runbook) stored with the backups. **Built** ([ADR-0037](decisions/ADR-0037-offline-install-kit.md)): `deploy/kit.sh`, the images
+  identified by their layers' digests, ClamAV's signatures, the repository as a git bundle, and `RESTORE.md`.
 - Quarterly drill: rebuild on a clean, offline machine, run AT-07, record the time.
 
 ### Observability
@@ -949,7 +979,7 @@ Administrator alert repeats until storage is fixed. Protected records are never 
 - Structured JSON logs, 90-day retention.
 - Administrator health page: broker connection state, age of the oldest area message,
   payload clock skew, evaluation latency, outbox depth + oldest message, journal size, disk
-  use, last successful backup.
+  use, last successful backup. **Built** ([ADR-0038](decisions/ADR-0038-system-health-page.md)): `/health`, every part graded OK, warning or critical with what to do; monitor-core now reports its time to judge and its journal.
 - Docker health checks with automatic restart + the monitor-core heartbeat.
 
 ---
@@ -1012,7 +1042,7 @@ before they are wired to a real backend.
 | Shifts | A/B/C at 06/14/22 ✓ | Same, Asia/Manila; Production Date = shift start date | Keep; add `shift_instance` server-side |
 | Auth | `currentUser` fixture | Local accounts, server sessions, role + workstation IP rules | **Done** ([ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)): sign-in, forced password change, inactivity warning, Accounts page, pages by role; the shift-boundary handover (SES-03, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)) |
 | Missing screens | — | Operator workflow (reason → clarifications → OCAP → ack), OCAP admin, notifications/re-drive, users, maintenance, health page, exports, bilingual EN/FIL | Add in their phases. **Done:** users (the Accounts page, [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md)), maintenance ([ADR-0017](decisions/ADR-0017-monitoring-control.md)), notifications and re-drive ([ADR-0023](decisions/ADR-0023-notifier.md)), and the operator workflow up to a Manager's guidance (the Reasons page, [ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)); OCAP comes in Phase 3 |
-| Language | English only | English + Filipino (LAN-01) | Introduce i18n early so strings aren't hard-coded twice |
+| Language | English only | English + Filipino (LAN-01) | **Decided** ([ADR-0047](decisions/ADR-0047-interface-stays-english.md)): the interface stays English; Filipino in the operator's chat ([ADR-0043](decisions/ADR-0043-assistant-in-tagalog.md)) and the OCAP's text only. No i18n framework |
 
 Things worth keeping from the prototype: the three-value (Target / HMI / Actual) mental
 model and strip, the design tokens and accessibility work (status never by colour alone,
@@ -1029,7 +1059,7 @@ model and strip, the design tokens and accessibility work (status never by colou
 | **0 · Foundations & spikes** | Host runtime on the target PC ([deploy/host-check](../deploy/host-check/README.md)); MQTT probe + publish-rejection test ([tools/mqtt-probe](../tools/mqtt-probe/README.md)); Timebase probe + delay analysis ([tools/timebase-analysis](../tools/timebase-analysis/README.md)); Ollama benchmark (EN + FIL) | **G0a / G0b / G0c** per [ADR-0005](decisions/ADR-0005-split-gate-g0.md): G0a starts Phase 1 on the simulator, G0b connects to the real broker, G0c starts Phase 3's AI ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) |
 | **1 · Monitoring core** | Acquisition, snapshot gate, HMI + Actual rules, events, audit, local accounts, disk journal | **G1** — AT-01…03 pass against the simulated MQTT publisher ([tools/mqtt-sim](../tools/mqtt-sim/README.md)) |
 | **2 · Workflow & notifications** | Shift sessions + handover, reason workflow, outbox, Teams flow, SMTP relay | **G2** — AT-04…06 pass |
-| **3 · OCAP & on-prem AI** | Upload + indexing, retrieval, clarification, summaries, bilingual UI, fallback | **G3** — AT-08 passes, **including with Ollama stopped** |
+| **3 · OCAP & on-prem AI** | Upload + indexing, retrieval, clarification, summaries, bilingual chat ([ADR-0047](decisions/ADR-0047-interface-stays-english.md)), fallback | **G3** — AT-08 passes, **including with Ollama stopped** |
 | **4 · Analytics** | Timebase adapter, range CSV, bucketing + pairing, statistics, Scatter + Trend tabs | **G4** — AT-ANA-01…10 pass on an independently calculated dataset |
 | **5 · Hardening & go-live** | Offline run, buffer replay, restore drill, performance run, parallel run on the line | **G5** — AT-07 passes, restore < 4 h, approval record signed |
 
@@ -1065,26 +1095,38 @@ cookie and workstation-IP checks behind the HTTPS proxy.
 
 **Phase 3 started on 2026-10-06 without its AI** ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md); G0c now gates the AI only). Built:
 - the OCAP library, with ClamAV scanning every upload;
-- the sections read from PDF and Word files, with their pages;
+- the sections read from PDF and Word files, with their pages, and from Excel row by row ([ADR-0039](decisions/ADR-0039-excel-ocaps-and-picked-reasons.md));
+- reasons the operator picks from an Excel OCAP's rows, each offering its own row ([ADR-0039](decisions/ADR-0039-excel-ocaps-and-picked-reasons.md));
 - versions activated by a Manager;
 - keyword search over the Active versions;
 - the workflow's OCAP steps;
 - a Manager's guidance with one file, or kept as a reusable OCAP.
 
 AT-08's deterministic part passes in `tests/acceptance/` (OCP-01…03, GDE-01, SEC-01, AI-01, and WF-01's OCAP branch), on
-generated OCAPs. **G3 still needs:**
-- the AI (O-01): grounded bilingual summaries, translation and embedding search;
-- AT-08 with Ollama running, and again with it stopped;
-- the Filipino interface (LAN-01);
-- the plant's real OCAPs.
+generated OCAPs.
+
+**Then the AI, on Ollama in the stack** (trial model qwen3.5:4b, 2026-10-08/09):
+- the AI's questions: the opening question from the OCAP rows for the mismatch, and at most two follow-ups from the
+  sections for the reason, with the fixed ones as the fallback ([ADR-0041](decisions/ADR-0041-local-ai-follow-up-questions.md), [ADR-0042](decisions/ADR-0042-ai-opens-the-conversation.md));
+- the operator's chat in Tagalog by default, the AI writing each question in both languages ([ADR-0043](decisions/ADR-0043-assistant-in-tagalog.md));
+- the OCAP in Tagalog: the plant's checked file ([ADR-0044](decisions/ADR-0044-checked-tagalog-ocap.md)), or the AI's translation behind checks ([ADR-0045](decisions/ADR-0045-ai-translates-the-ocap.md));
+- the AI's summary of the sections offered, beside the exact source, shown only when grounded ([ADR-0046](decisions/ADR-0046-ai-summary-of-the-ocap.md)).
+
+AT-08's AI part passes too (AI-01/02, OCP-01/02, LAN-01, DAT-01, WF-01): with Ollama running (a stand-in answering as a
+correct model would) and again with it stopped; the same flow runs against a real Ollama when `CENTERLINE_AT08_OLLAMA`
+names it. The rest of the interface stays English ([ADR-0047](decisions/ADR-0047-interface-stays-english.md)). **G3 still needs:**
+- bge-m3 downloaded (the registry refused it on 2026-10-09), and the search measured on the 14 Taglish reasons
+  ([ADR-0048](decisions/ADR-0048-ocap-search-by-meaning.md), built);
+- the model choice (O-01), with that real-Ollama run on the control-room PC as its evidence;
+- the plant's real OCAPs checked (the Tagalog draft, the reasons a Manager confirms).
 
 **Phase 5 started on 2026-10-07 with the backups** ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)): an hourly set of the
 database, the roles and the settings, kept 48 hours, 30 days and 12 months here and off-host, the day's first set
 restored and checked, and `deploy/restore.sh`, which restored it onto a new server in 6 seconds. **G5 still needs:**
 - the off-host place (O-27);
 - the quarterly drill on a clean, offline machine;
-- the offline install kit;
-- AT-07: offline operation, buffer replay, storage degraded mode (O-12) and restart recovery;
+- AT-07's DEP-05, which needs the control-room PC (the rest of AT-07 passes:
+  [ADR-0036](decisions/ADR-0036-storage-degraded-mode-and-at07.md));
 - the performance run;
 - the parallel run on the line;
 - the signed approval record.
@@ -1151,7 +1193,7 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 | O-07 | Analytics visual details from the reference UI | Medium | Phase 4 |
 | O-10 | Which 10 groups show for Production Date grouping | Medium | Proposed default in place: the 10 most recent (ADR-0008); confirm |
 | O-11 | Staged handover steps; unfinished request at shift end | Medium | **Closed** 2026-10-01 ([ADR-0025](decisions/ADR-0025-shifts-and-reasons.md)): a warning 5 min before, then the session ends; an unfinished request closes as not answered, and the next shift gets a new one |
-| O-12 | What stops/continues in protected degraded mode | Medium | Phase 5 |
+| O-12 | What stops/continues in protected degraded mode | Medium | **Closed** 2026-10-07: the SDD's proposal, ending below 85 % ([ADR-0036](decisions/ADR-0036-storage-degraded-mode-and-at07.md)) |
 | O-13 | Who may disable monitoring, import mappings, open Analytics | Medium | **Closed:** [ADR-0016](decisions/ADR-0016-accounts-sign-in-and-roles.md): disabling is the Manager's; mappings (import included) the Administrator's; Analytics both |
 | O-14 | Broker host, port, TLS/CA, Centerline account and ACL, publish mode and maximum interval, liveness topic, broker availability | High | Real-broker connection (G0b). TLS, the account and the ACL are accepted as they are for now ([ADR-0021](decisions/ADR-0021-g0b-revised.md)); questions in [tools/mqtt-probe](../tools/mqtt-probe/README.md); answers are entered and tested on the Configuration page ([ADR-0011](decisions/ADR-0011-configuration-page.md)) |
 | O-15 | SKU/recipe tag for the Volpak | — | **Dropped:** Centerline has no SKU ([ADR-0027](decisions/ADR-0027-no-sku.md)) |
@@ -1163,7 +1205,7 @@ to send the UNS/edge team, Timebase admin, process engineering and OT/IT are tra
 | O-21 | If an area goes silent during long stops (Timebase showed Dosing silent for up to 34 min), the line-wide snapshot gate pauses HMI mismatch monitoring too, which ADR-0010 wants to keep running. Capture a long stop on the broker, then decide: accept it, or gate per area | Medium | HMI monitoring during long stops ([ADR-0006](decisions/ADR-0006-mqtt-acquisition.md)) |
 | O-22 | Live updates: the WebSocket at `/api/v1/ws` with `LISTEN/NOTIFY` (§5, §11), or the polling built so far | High | **Closed** 2026-10-06: polling on one line; the WebSocket only with a second line or a measured need ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)) |
 | O-23 | `Idempotency-Key` on creating POSTs and timestamps ending in `Z` (§11) | Medium | **Closed** 2026-10-06: both built ([ADR-0028](decisions/ADR-0028-polling-idempotency-g2-acceptance.md)) |
-| O-24 | ClamAV's signatures on the plant network without the internet: a local mirror, an offline update kit, or a route to the signature servers that IT allows | Medium | Upload scanning at the plant (SEC-01, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)). Where it has the internet, the clamav container updates itself |
+| O-24 | ClamAV's signatures on the plant network without the internet: a local mirror, an offline update kit, or a route to the signature servers that IT allows | Medium | Upload scanning at the plant (SEC-01, [ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)). Where it has the internet, the clamav container updates itself. The offline kit carries the signatures as of its day ([ADR-0037](decisions/ADR-0037-offline-install-kit.md)); keeping them current at the plant is still open |
 | O-25 | HTTP or HTTPS on the control-room PC: the SDD wants HTTPS on the LAN; the Docker stack serves plain HTTP for testing ([ADR-0032](decisions/ADR-0032-docker-stack-over-http.md)). HTTPS needs a certificate the workstations trust (Caddy's CA installed on each, or one from IT) | High | Go-live (G5): passwords and session cookies cross the LAN unencrypted over HTTP |
 | O-26 | The line view's placement of the zones on the machine model: that Front and Rear are the jaws named F and R, the order of the vertical seals, and where V6, the dosing nozzles and the gauge (drawn by the page, not modelled yet) really are. Szyrelle confirms them at the machine with maintenance | Low | The line view ([ADR-0033](decisions/ADR-0033-line-view-3d.md), [ADR-0034](decisions/ADR-0034-line-view-blender-model.md)); the judging is unaffected |
 | O-27 | The backups' off-host place: a network share or a second disk, restricted like `deploy/config` (the sets hold every record and the PC's secrets), and whether IT wants the sets encrypted | High | BKP-01's off-host copies; until then the sets are on the PC only ([ADR-0035](decisions/ADR-0035-backups-pg-dump.md)) |
@@ -1195,7 +1237,7 @@ marked placeholder default**, never as a hard-coded constant.
 | ACT-01…04 | monitor-core, notifier | 6, 8 | AT-03 |
 | MON-01, MNT-01/02 | monitor-core, api | 6, 13 | *none dedicated* |
 | WF-01…03 | api, monitor-core | 7 | AT-05 |
-| AI-01/02, OCP-01…03, GDE-01, LAN-01 | ai-worker, ollama, api | 7 | AT-08. Its deterministic part is built ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) and covers OCP-03 and GDE-01, which the URS's AT-08 doesn't; the AI part comes with the ai-worker |
+| AI-01/02, OCP-01…03, GDE-01, LAN-01 | ollama, api (its AI jobs) | 7 | AT-08. Its deterministic part ([ADR-0031](decisions/ADR-0031-ocap-library-deterministic-path.md)) covers OCP-03 and GDE-01, which the URS's AT-08 doesn't; its AI part ([ADR-0046](decisions/ADR-0046-ai-summary-of-the-ocap.md)) runs with Ollama running and stopped |
 | NOT-01…07 | notifier | 8 | AT-06 |
 | DAT-01, RET-01/02, EXP-01 | postgres, api | 10 | *none dedicated* |
 | BKP-01/02, AVL-01, RES-01/02 | backup-agent, monitor-core | 13 | AT-07 (restore drill not covered) |

@@ -1,0 +1,38 @@
+# Simulated plant data for testing away from the plant network: a local MQTT broker on the stack's network and the
+# simulator (tools/mqtt-sim) publishing Volpak-shaped data to it, on the plant's topics and fields.
+#
+#   docker compose -f deploy/compose.yaml -f deploy/compose.sim.yaml up -d sim-broker sim
+#
+# Then the saved broker (Configuration → Connections) is sim-broker:1883, no TLS, no account. Back at the plant: stop
+# both, `docker compose -f deploy/compose.yaml -f deploy/compose.sim.yaml rm -sf sim sim-broker`, and save the plant
+# broker again (deploy/README.md, "Away from the plant"). Everything monitor-core judges here goes into the stack's
+# database as if it were real.
+
+services:
+  sim-broker:
+    image: eclipse-mosquitto:2
+    command: mosquitto -c /mosquitto-no-auth.conf  # anonymous, on this network only: nothing is published to the host
+    restart: unless-stopped
+    networks: [centerline]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+  sim:
+    image: centerline-services:latest
+    working_dir: /app/tools/mqtt-sim
+    # Steady values; a short setpoint change every 5 min; a mismatch nobody puts back every 10 min, for 15 min (the
+    # operator's reason); an actual value leaving its band every 15 min (Warning, then on every other one Critical)
+    command: >-
+      python mqtt_sim.py --host sim-broker --allow-host sim-broker
+      --brief-every 300 --mismatch-every 600 --mismatch-for 900 --drift-every 900
+    volumes:
+      - ../tools/mqtt-sim:/app/tools/mqtt-sim:ro
+      - ../tools/common:/app/tools/common:ro
+      - ./config/parameter-register.json:/app/config/parameter-register.json:ro  # the tags it publishes
+    depends_on: [sim-broker]
+    restart: unless-stopped
+    networks: [centerline]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}

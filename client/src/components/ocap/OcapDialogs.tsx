@@ -1,4 +1,4 @@
-import { FileUp, Loader2 } from 'lucide-react'
+import { FileUp, Languages, Loader2 } from 'lucide-react'
 import { useRef, useState } from 'react'
 
 import { CheckRow, FormField } from '@/components/setup/FormParts'
@@ -19,14 +19,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { ACCEPT, MAX_FILE_BYTES, ocapApi, readBase64 } from '@/services/ocapApi'
 import { ApiProblem } from '@/services/http'
-import type { OcapDocument, OcapLanguage, OcapVersion } from '@/types/ocapApi'
+import type { OcapDocument, OcapLanguage, OcapVersion, OcapVersionSection, ReasonDirection } from '@/types/ocapApi'
 import { cn } from '@/utils/cn'
 
 import { LANGUAGE_LABEL, sizeLabel } from './ocapModel'
 
 /**
- * A Manager uploads a PDF or Word file: a new OCAP, or a new version of one. It's scanned for malware, read into
- * sections with their pages, and kept as a Draft until it's activated (OCP-01, OCP-03, ADR-0031).
+ * A Manager uploads a PDF, Word or Excel file: a new OCAP, or a new version of one. It's scanned for malware, read into
+ * sections with their pages (an Excel workbook row by row, ADR-0039), and kept as a Draft until it's activated
+ * (OCP-01, OCP-03, ADR-0031).
  */
 export function UploadDialog({ document: doc, onClose, onDone }: {
   /** null: a new OCAP */
@@ -70,8 +71,9 @@ export function UploadDialog({ document: doc, onClose, onDone }: {
             <FileUp className="size-5" aria-hidden /> {doc ? `A new version of ${doc.code}` : 'Upload an OCAP'}
           </DialogTitle>
           <DialogDescription>
-            A PDF or Word (.docx) file with text in it, 20 MB at most. It's scanned, read into sections with their pages and kept
-            as a Draft: check its sections, then activate it.
+            A PDF, Word (.docx) or Excel (.xlsx) file with text in it, 20 MB at most. It's scanned, read into sections and kept
+            as a Draft: check its sections, then activate it. In a workbook each row is a section, and a row's phenomenon becomes
+            a reason operators can pick.
           </DialogDescription>
         </DialogHeader>
         <DialogBody className="flex flex-col gap-4">
@@ -93,7 +95,7 @@ export function UploadDialog({ document: doc, onClose, onDone }: {
               {file ? (
                 <span className="text-ink font-medium">{file.name} <span className="text-ink-muted font-normal">· {sizeLabel(file.size)}</span></span>
               ) : (
-                <span className="text-ink-soft">Choose a PDF or Word file…</span>
+                <span className="text-ink-soft">Choose a PDF, Word or Excel file…</span>
               )}
             </button>
           </FormField>
@@ -196,6 +198,162 @@ export function StatusDialog({ version: v, action, otherActive, onClose, onDone 
           <Button type="button" size="sm" disabled={busy || !reason.trim()}
                   className={cn(action === 'suspend' && 'bg-critical-solid hover:bg-critical-solid/90')} onClick={() => void submit()}>
             {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} {action === 'activate' ? 'Activate' : 'Suspend'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Which HMI mismatches offer an Excel row as a reason (ADR-0039): the parameters, and whether only after the setpoint
+ * was raised or lowered. Proposed from the file at upload; a Manager checks it. Takes effect for the next requests.
+ */
+export function ReasonTagDialog({ version: v, section, onClose, onDone }: {
+  version: OcapVersion
+  section: OcapVersionSection
+  onClose: () => void
+  onDone: (v: OcapVersion) => void
+}) {
+  const [ids, setIds] = useState<string[]>(section.reason?.parameterIds ?? [])
+  const [direction, setDirection] = useState<ReasonDirection>(section.reason?.direction ?? 'either')
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<ApiProblem | null>(null)
+
+  const submit = async () => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      onDone(await ocapApi.tagReason(section.id, { parameterIds: ids, direction, reason }))
+    } catch (caught) {
+      setProblem(asProblem(caught))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>When to offer this reason</DialogTitle>
+          <DialogDescription>
+            “{section.phenomenon}” · {v.code} v{v.number}. Operators see it as a reason to pick for an HMI mismatch on the
+            parameters you tick{v.status === 'active' ? ', from the next request on' : ', once the version is activated'}.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-4">
+          <FormField label="For HMI mismatches on" error={problem?.forField('parameterIds')}
+                     hint="None ticked: it isn't offered, but it's still searched.">
+            <div className="flex flex-col gap-2">
+              {v.reasonParameters.map((p) => (
+                <CheckRow key={p.id} checked={ids.includes(p.id)} label={`${p.id} ${p.name}`}
+                          onChange={(on) => setIds((cur) => (on ? [...cur, p.id] : cur.filter((x) => x !== p.id)))} />
+              ))}
+            </div>
+          </FormField>
+          <fieldset className="flex flex-col gap-2 text-[13px]">
+            <legend className="micro-label mb-1.5">After the setpoint was</legend>
+            {(['either', 'raised', 'lowered'] as ReasonDirection[]).map((d) => (
+              <label key={d} className="flex items-center gap-2">
+                <input type="radio" name="reason-direction" checked={direction === d} onChange={() => setDirection(d)} />
+                {d === 'either' ? 'Raised or lowered' : d === 'raised' ? 'Raised only' : 'Lowered only'}
+              </label>
+            ))}
+          </fieldset>
+          <FormField label="Reason" error={problem?.forField('reason')}>
+            <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)}
+                      placeholder="e.g. The cutter is set the same way for every sealer" />
+          </FormField>
+          <ProblemLine problem={problem} />
+        </DialogBody>
+        <DialogFooter>
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" disabled={busy || !reason.trim()} onClick={() => void submit()}>
+            {busy && <Loader2 className="size-4 animate-spin" aria-hidden />} Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * A Manager adds the plant's checked Tagalog version of an OCAP version (ADR-0044): the same sheets and rows (or, for PDF
+ * and Word, the same sections), scanned and paired; it's a Draft until activated. Or activates or withdraws one.
+ */
+export function TranslationDialog({ version: v, translation, onClose, onDone }: {
+  version: OcapVersion
+  /** null: a new Tagalog version; else the one to activate or withdraw */
+  translation: { id: string; source: string; action: 'activate' | 'withdraw' } | null
+  onClose: () => void
+  onDone: (v: OcapVersion) => void
+}) {
+  const picker = useRef<HTMLInputElement>(null)
+  const [file, setFile] = useState<File | null>(null)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<ApiProblem | null>(null)
+
+  const submit = async () => {
+    setBusy(true)
+    setProblem(null)
+    try {
+      onDone(translation
+        ? await ocapApi.setTranslation(translation.id, translation.action, reason)
+        : await ocapApi.addTranslation(v.id, { source: file!.name, contentBase64: await readBase64(file!), reason }))
+    } catch (caught) {
+      setProblem(asProblem(caught))
+      setBusy(false)
+    }
+  }
+
+  const title = !translation ? `The Tagalog version of ${v.code} v${v.number}`
+    : translation.action === 'activate' ? 'Show the Tagalog version to operators' : 'Stop showing the Tagalog version'
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Languages className="size-5" aria-hidden /> {title}
+          </DialogTitle>
+          <DialogDescription>
+            {!translation
+              ? 'The plant’s own checked translation: the same file with its text in Tagalog, the same sheets and rows. It’s paired with this version row by row, kept as a Draft, and shown to operators once activated, always with the English below it.'
+              : translation.action === 'activate'
+                ? `${translation.source}: operators read its Tagalog text in the chat, with the English below it. An earlier Tagalog version of this OCAP is retired.`
+                : `${translation.source}: operators see only the English again.`}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody className="flex flex-col gap-4">
+          {!translation && (
+            <FormField label="File" error={problem?.forField('contentBase64')}>
+              <input ref={picker} type="file" accept={ACCEPT} className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              <button type="button" onClick={() => picker.current?.click()}
+                      className="border-line hover:bg-surface-muted w-full rounded-md border border-dashed px-3 py-4 text-left text-[13px]">
+                {file ? (
+                  <span className="text-ink font-medium">{file.name} <span className="text-ink-muted font-normal">· {sizeLabel(file.size)}</span></span>
+                ) : (
+                  <span className="text-ink-soft">Choose the Tagalog file…</span>
+                )}
+              </button>
+            </FormField>
+          )}
+          <FormField label="Reason" error={problem?.forField('reason')}>
+            <Textarea rows={2} value={reason} onChange={(e) => setReason(e.target.value)}
+                      placeholder={translation ? 'e.g. Checked by the line’s senior operator' : 'e.g. Translated by the plant, checked by the Cell Lead'} />
+          </FormField>
+          <ProblemLine problem={problem} />
+        </DialogBody>
+        <DialogFooter>
+          <Button type="button" variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="button" size="sm" disabled={busy || !reason.trim() || (!translation && !file)} onClick={() => void submit()}>
+            {busy && <Loader2 className="size-4 animate-spin" aria-hidden />}{' '}
+            {!translation ? 'Upload as a Draft' : translation.action === 'activate' ? 'Activate' : 'Withdraw'}
           </Button>
         </DialogFooter>
       </DialogContent>

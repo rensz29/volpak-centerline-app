@@ -7,6 +7,8 @@ Every hour it writes a backup set: a folder named by its UTC time, holding
 - manifest.json: each file's size and SHA-256, and the restore check's result.
 
 A set is written as <name>.partial and renamed when complete, so a half-written set never looks like a backup.
+At 90 % storage (RES-02, ADR-0036) it also runs the eligible cleanup, once per episode monitor-core reports: the sets
+past their policy and the idempotency keys past their 24 hours, never a protected record, and audits what it removed.
 Once a day the newest set is restored into a scratch database and checked: its tables, and the audit chain
 (audit_log_verify). Sets are copied off-host when a folder is given, and both places keep 48 hours of sets, the
 newest of each of the last 30 days and of each of the last 12 months. status.json says how the last run went.
@@ -131,6 +133,48 @@ class Agent:
 
     def _sql(self, database: str, query: str) -> str:
         return self._run("psql", "-X", "-At", "-v", "ON_ERROR_STOP=1", "-d", database, "-c", query, timeout=600).strip()
+
+    def _sql_in(self, query: str, **values: str) -> str:
+        """A statement on stdin, with psql variables quoted by psql itself (:'name'): never pasted into the SQL."""
+        args = ["psql", "-X", "-At", "-v", "ON_ERROR_STOP=1", "-d", self.s.database.dbname]
+        for k, v in values.items():
+            args += ["-v", f"{k}={v}"]
+        try:
+            done = subprocess.run(args, input=query, env=self._env(), capture_output=True, text=True, timeout=600)
+        except FileNotFoundError:
+            raise BackupError("psql isn't installed") from None
+        if done.returncode != 0:
+            lines = [line for line in done.stderr.strip().splitlines() if line.strip()]
+            raise BackupError(f"psql failed: {lines[-1] if lines else f'exit {done.returncode}'}")
+        return done.stdout.strip()
+
+    # --- RES-02's eligible cleanup ----------------------------------------------------------------------------------
+    def storage_state(self) -> dict | None:
+        """monitor-core's storage state from a fresh heartbeat (ADR-0036), or None."""
+        out = self._sql_in("""SELECT status->'storage' FROM monitor_heartbeat
+                               WHERE beat_at > clock_timestamp() - interval '60 seconds' ORDER BY beat_at DESC LIMIT 1""")
+        return json.loads(out) if out else None
+
+    def cleanup(self, storage: dict, now: datetime | None = None) -> dict:
+        """What may go at 90 %: backup sets past their policy, here and off-host, and idempotency keys past their
+        24 hours (ADR-0028). Never a protected record. The audit log says what went."""
+        now = now or datetime.now(timezone.utc)
+        here = prune(self.s.backup_dir, now, self.s.keep)
+        offhost = prune(self.s.offhost_dir, now, self.s.keep) if self.s.offhost_dir and self.s.offhost_dir.is_dir() else []
+        keys = int(self._sql_in("""WITH gone AS (DELETE FROM idempotency_key WHERE created_at < now() - interval '24 hours'
+                                    RETURNING 1) SELECT count(*) FROM gone""") or 0)
+        done = {"at": iso(now), "usedPct": storage.get("usedPct"), "since": storage.get("since"),
+                "backupSets": here, "offhostSets": offhost, "idempotencyKeys": keys}
+        summary = (f"Storage cleanup at {storage.get('usedPct')} % (RES-02): {len(here) + len(offhost)} backup set(s) past "
+                   f"their policy, {keys} expired idempotency key(s). Nothing protected was deleted")
+        self._sql_in("""INSERT INTO audit_log (id, at, actor, action, summary, details)
+                        VALUES (gen_random_uuid(), now(), 'backup-agent', 'storage.cleanup', :'summary', :'details'::jsonb)""",
+                     summary=summary, details=json.dumps(done))
+        status = self.status()
+        status["cleanup"] = done
+        self._write_status(status)
+        log.warning("%s", summary)
+        return done
 
     # --- One set --------------------------------------------------------------------------------------------------
     def backup(self, now: datetime | None = None, check: bool | None = None) -> Path:

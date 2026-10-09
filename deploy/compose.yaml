@@ -10,8 +10,14 @@
 
 name: centerline
 
+# Each container's log, rotated: at most 3 files of 10 MB, so diagnostic logs can't fill the disk (RES-02, ADR-0036)
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "10m", max-file: "3"}
+
 x-python: &python
   image: centerline-services:latest
+  logging: *logging
   build:
     context: ..
     dockerfile: deploy/services.Dockerfile
@@ -23,6 +29,7 @@ x-python: &python
 services:
   postgres:
     image: pgvector/pgvector:pg17
+    logging: *logging
     environment:
       POSTGRES_DB: centerline
       POSTGRES_USER: centerline
@@ -48,6 +55,7 @@ services:
       CENTERLINE_SCHEME: ${CENTERLINE_SCHEME:-http}  # over plain HTTP the session cookie can't be Secure (ADR-0032)
     volumes:
       - ./config:/app/config  # it saves the connections, the register's export and the query log here
+      - ${CENTERLINE_BACKUP_DIR:-./backups}:/app/backups:ro  # the backup agent's status.json, for the health page (ADR-0038)
     depends_on:
       postgres: {condition: service_healthy}
     healthcheck:
@@ -95,6 +103,7 @@ services:
 
   clamav:  # scans every uploaded OCAP and guidance file before it's kept (SEC-01, ADR-0031)
     image: clamav/clamav:stable
+    logging: *logging
     volumes:
       - clamav-db:/var/lib/clamav  # its signatures, kept between restarts; freshclam updates them (O-24 offline)
     restart: unless-stopped
@@ -102,8 +111,25 @@ services:
     # Its own healthcheck (clamdcheck.sh). The first start downloads the signatures and loads them in a few minutes;
     # meanwhile uploads are refused with "the malware scanner isn't answering". Nothing waits for it.
 
+  ollama:  # the local language model for the follow-up questions (AI-01, ADR-0041): nothing leaves this PC
+    image: ollama/ollama:${CENTERLINE_OLLAMA_TAG:-0.40.1}  # pinned: the version tested here
+    logging: *logging
+    volumes:
+      - ollama:/root/.ollama  # the models, pulled once (deploy/README.md, "The AI model"), kept between restarts
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"  # the model stays loaded, so the first question of a shift isn't slowed by loading it
+      OLLAMA_NUM_PARALLEL: "1"  # one line, one question at a time
+      OLLAMA_MAX_LOADED_MODELS: "2"  # the chat model on the GPU and the embedding model on the CPU (ADR-0048), both kept loaded
+      OLLAMA_CONTEXT_LENGTH: "4096"  # as the api asks: a change would reload the model
+      OLLAMA_NO_CLOUD: "true"  # Ollama's cloud models off: everything runs on this PC (AI-01)
+    restart: unless-stopped
+    networks: [centerline]  # not published: only the api reaches it, as ollama:11434
+    # On the CPU here; deploy/compose.gpu.yaml gives it an NVIDIA GPU. Without it, or slow, operators get the fixed
+    # questions: nothing waits for it.
+
   proxy:
     image: centerline-web:latest
+    logging: *logging
     build:
       context: ..
       dockerfile: deploy/web.Dockerfile
@@ -130,6 +156,7 @@ volumes:
   clamav-db:
   caddy-data:
   caddy-config:
+  ollama:
 
 secrets:
   postgres-password:

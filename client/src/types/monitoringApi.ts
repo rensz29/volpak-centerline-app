@@ -146,6 +146,19 @@ export interface EventCounts {
   warning: number
   critical: number
   unacknowledgedCritical: number
+  /** monitor-core's last storage reading (RES-02, ADR-0036); null without a fresh heartbeat */
+  storage?: StorageState | null
+}
+
+/** How full the disk under the journal and the database is, as monitor-core judged it (ADR-0036). */
+export interface StorageState {
+  state: 'normal' | 'warning' | 'cleanup' | 'degraded'
+  usedPct: number | null
+  disk: string | null
+  since: string | null
+  error: string | null
+  limits: { warn: number; cleanup: number; degradedUntilBelow: number }
+  briefChangesSkipped?: number
 }
 
 export interface EventFilters {

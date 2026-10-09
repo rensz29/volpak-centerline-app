@@ -18,6 +18,22 @@ class ScannerUnavailable(Exception):
     """clamd didn't answer, or answered with an error."""
 
 
+def version(s: ScannerSettings) -> str:
+    """clamd's version and its signatures' date, e.g. "ClamAV 1.4.3/27785/Tue Oct  7 08:23:45 2026" (the health page)."""
+    try:
+        with socket.create_connection((s.host, s.port), timeout=min(s.timeout_s, 5)) as sock:
+            sock.sendall(b"zVERSION\0")
+            reply = b""
+            while not reply.endswith(b"\0"):
+                got = sock.recv(4096)
+                if not got:
+                    break
+                reply += got
+    except OSError as e:
+        raise ScannerUnavailable(f"clamd at {s.host}:{s.port}: {e}") from None
+    return reply.rstrip(b"\0").decode("utf-8", "replace").strip()
+
+
 def scan(data: bytes, s: ScannerSettings) -> tuple[str, str]:
     """("clean" | "not_scanned" | "infected", clamd's answer or why it wasn't asked)."""
     if s.type == "none":

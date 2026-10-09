@@ -72,6 +72,10 @@ class FakeTools(Agent):
             return self.chain_breaks_at
         return {"SHOW server_version": "17.11"}.get(query, "42")
 
+    def _sql_in(self, query: str, **values: str) -> str:
+        self.calls.append(("psql", query.split()[0], *values.values()))
+        return "3" if "DELETE FROM idempotency_key" in query else ""
+
 
 @pytest.fixture
 def settings(tmp_path: Path) -> BackupSettings:
@@ -175,3 +179,19 @@ def test_settings_from_the_stack(tmp_path, monkeypatch):
     assert s.database.password_file == (tmp_path / "secrets" / "postgres-password").resolve()
     assert (s.config_dir, s.backup_dir, s.offhost_dir) == (tmp_path.resolve(), Path("/backups"), Path("/offhost"))
     assert s.keep == Keep(hours=48, days=7, months=12)
+
+
+# --- RES-02's eligible cleanup (ADR-0036) -----------------------------------------------------------------------------
+
+@pytest.mark.urs("RES-02")
+def test_at_90_percent_the_cleanup_removes_only_what_is_past_its_policy_and_audits_it(settings):
+    tools = FakeTools(settings)
+    for stamp in [NOW - timedelta(days=3, hours=h) for h in range(3)] + [NOW]:
+        tools.backup(stamp, check=False)
+    done = tools.cleanup({"state": "cleanup", "usedPct": 91.2, "since": "2026-10-07T12:00:00+00:00"}, NOW)
+    assert done["backupSets"] == ["20261004T100200Z", "20261004T110200Z"] and done["idempotencyKeys"] == 3
+    audit = [c for c in tools.calls if c[:2] == ("psql", "INSERT")]
+    assert len(audit) == 1 and "Storage cleanup at 91.2 %" in audit[0][2] and "Nothing protected was deleted" in audit[0][2]
+    assert json.loads(audit[0][3])["backupSets"] == done["backupSets"]
+    assert tools.status()["cleanup"]["idempotencyKeys"] == 3
+    assert [p.name for _, p in sets(settings.backup_dir)] == ["20261004T120200Z", "20261007T120200Z"]

@@ -154,7 +154,9 @@ def test_the_history_filters_pages_counts_and_exports(make_client, database):
     reached = c.get("/api/v1/events", params={"reached": "CRITICAL"}).json()["events"]
     assert {e["id"] for e in reached} == {str(critical), str(warning)}
     assert c.get("/api/v1/events", params={"before": "nonsense"}).status_code == 422
-    assert c.get("/api/v1/events/counts").json() == {"open": 2, "hmi": 0, "warning": 1, "critical": 1, "unacknowledgedCritical": 1}
+    # No heartbeat here, so no storage reading for the pages' banner (ADR-0036)
+    assert c.get("/api/v1/events/counts").json() == {"open": 2, "hmi": 0, "warning": 1, "critical": 1, "unacknowledgedCritical": 1,
+                                                     "storage": None}
 
     r = c.get("/api/v1/events/export.csv", params={"open": "false"})
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")

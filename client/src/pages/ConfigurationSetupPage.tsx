@@ -1,5 +1,5 @@
 import { Cable, ClipboardList, CloudOff, Eye, Ruler, Scale, Send, Tags, TriangleAlert, Waypoints } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { EmptyState } from '@/components/shared/EmptyState'
@@ -14,10 +14,12 @@ import { RoutingTab } from '@/components/setup/routing/RoutingTab'
 import { RulesTab } from '@/components/setup/rules/RulesTab'
 import { RecentChanges, TagRegister } from '@/components/setup/TagRegister'
 import { WorkflowQuestionsCard } from '@/components/setup/WorkflowQuestionsCard'
+import { monitorValues } from '@/components/setup/liveValues'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useRoles } from '@/hooks/useAuth'
 import { configApi } from '@/services/configApi'
+import { monitoringApi } from '@/services/monitoringApi'
 import type { Connections, LatestValue, RegisterParameter, RegisterView } from '@/types/configApi'
 
 type Tab = 'connections' | 'tags' | 'mappings' | 'rules' | 'notifications' | 'workflow' | 'ranges'
@@ -48,7 +50,10 @@ export function ConfigurationSetupPage() {
   const tab: Tab = TABS.includes(requested as Tab) ? (requested as Tab) : 'connections'
   const [connections, setConnections] = useState<Connections | null>(null)
   const [register, setRegister] = useState<RegisterView | null>(null)
-  const [latest, setLatest] = useState<Record<string, LatestValue | null>>({})
+  const [historian, setLatest] = useState<Record<string, LatestValue | null>>({})
+  const [live, setLive] = useState<Record<string, LatestValue>>({})
+  // monitor-core's values off MQTT win: live, and there even away from the plant (the simulator); Timebase fills the rest
+  const latest = useMemo(() => ({ ...historian, ...live }), [historian, live])
   const [editing, setEditing] = useState<RegisterParameter | null>(null)
   const [connectionsError, setConnectionsError] = useState<string | null>(null)
   const [registerError, setRegisterError] = useState<string | null>(null)
@@ -75,6 +80,27 @@ export function ConfigurationSetupPage() {
       })
       .catch((caught: unknown) => setRegisterError(message(caught)))
   }, [loadLatest])
+
+  // monitor-core's values, every 5 s while the page is open: the Tags and Rules tabs show the HMI as it is now
+  useEffect(() => {
+    if (!register) return
+    const controller = new AbortController()
+    const load = () => {
+      if (document.visibilityState !== 'visible') return
+      monitoringApi
+        .live(controller.signal)
+        .then((view) => setLive(monitorValues(register, view)))
+        .catch((caught: unknown) => {
+          if (!(caught instanceof DOMException && caught.name === 'AbortError')) setLive({})
+        })
+    }
+    load()
+    const timer = window.setInterval(load, 5000)
+    return () => {
+      controller.abort()
+      window.clearInterval(timer)
+    }
+  }, [register])
 
   const unavailable = (what: string, detail: string) => (
     <div className="bg-surface border-critical-border shadow-card rounded-lg border">

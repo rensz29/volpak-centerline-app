@@ -133,8 +133,9 @@ On the Configuration page, as an Administrator, then as a Manager:
 4. **Notifications:** who gets which messages. Then **Reasons**, and **Analytics ranges** once process engineering
    fills in the template.
 5. **Accounts:** the Managers and the operators.
-6. **OCAP library** (a Manager): upload the plant's OCAPs, PDF or Word, check each one's sections and activate it
-   ([ADR-0031](docs/decisions/ADR-0031-ocap-library-deterministic-path.md)). Until then, every reason goes to a Manager's guidance.
+6. **OCAP library** (a Manager): upload the plant's OCAPs, PDF, Word or Excel, check each one's sections and activate it
+   ([ADR-0031](docs/decisions/ADR-0031-ocap-library-deterministic-path.md)). Until then, every reason goes to a Manager's guidance. In an
+   Excel OCAP, check under each row which parameters it's offered for as a reason to pick ([ADR-0039](docs/decisions/ADR-0039-excel-ocaps-and-picked-reasons.md)).
 
 **Operator workstations:** operators sign in only at the line's desks (SES-04). Put the desks' addresses in
 `deploy/config/api.json` under `auth.operator_workstations`, for example

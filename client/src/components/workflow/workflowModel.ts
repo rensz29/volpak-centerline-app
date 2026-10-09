@@ -1,4 +1,4 @@
-import type { RequestStatus, WorkflowEntry, WorkflowRequest } from '@/types/workflowApi'
+import type { RequestStatus, Step, WorkflowEntry, WorkflowRequest } from '@/types/workflowApi'
 
 /** How the Reasons page names each state of a request (ADR-0025, ADR-0031). */
 export const STATUS_LABEL: Record<RequestStatus, string> = {
@@ -44,3 +44,6 @@ export function waitsFor(r: WorkflowRequest, roles: { isOperator: boolean; isMan
 export function withUnit(v: string | null, unit: string | null): string {
   return v === null ? '—' : unit ? `${v} ${unit}` : v
 }
+
+/** The steps an operator answers; "guidance" is a Manager's */
+export const OPERATOR_STEPS: Step[] = ['reason', 'answers', 'ocap', 'acknowledgment']

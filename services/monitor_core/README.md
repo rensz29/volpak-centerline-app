@@ -83,6 +83,17 @@ and emptied. A restart replays the last run's journal before anything else. Past
 (30 min) the gate closes with the reason and nothing new is judged, so nothing is ever dropped
 ([ADR-0018](../../docs/decisions/ADR-0018-disk-journal.md), RES-01).
 
+Every minute it measures the disk under the journal, which is the database volume's disk, plus any `storage_paths` in
+its config ([ADR-0036](../../docs/decisions/ADR-0036-storage-degraded-mode-and-at07.md), RES-02):
+- at 80 % it warns;
+- at 90 % the backup agent runs the eligible cleanup;
+- still at 90 % ten minutes later, it enters **protected degraded mode**: it stops writing brief-change records, and
+  the api refuses new uploads and stops its query log. Monitoring, events, workflow, notifications and backups carry
+  on.
+
+It ends below 85 %. Each state goes in the heartbeat (`storage`), and an alert goes to the system recipients on
+entering it, hourly while degraded, and at the end.
+
 ## What it writes
 
 | Table | Holds |

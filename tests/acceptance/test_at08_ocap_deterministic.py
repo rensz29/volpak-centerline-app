@@ -1,8 +1,9 @@
 """AT-08, its deterministic part: the OCAP library, the top three sections with their exact source, and the path
 without AI.
 
-URS v1.1 §7 (OCP-01…03, GDE-01), WF-01, SEC-01 and AI-01, as built in ADR-0031. monitor-core judges each mismatch on
-the simulated line; the Manager and the operator act through the api. Nothing here runs a model: this is the path
+URS v1.1 §7 (OCP-01…03, GDE-01), WF-01, SEC-01 and AI-01, as built in ADR-0031, and the reasons an operator picks from
+an Excel OCAP's rows (ADR-0039). monitor-core judges each mismatch on the simulated line; the Manager and the operator
+act through the api. Nothing here runs a model: this is the path
 the plan keeps for when Ollama is down or slow, and the only one until O-01 closes. AT-08's AI part (grounded
 summaries, translation, embedding search) comes with the ai-worker, and G3 waits for it.
 """
@@ -93,6 +94,35 @@ def test_a_mismatch_is_offered_the_three_best_active_sections_with_their_exact_s
     # the event's evidence keeps what was offered and what was chosen
     evidence = owner.get(f"/api/v1/events/{event['id']}").json()["requests"][0]
     assert [o["sectionId"] for o in evidence["offered"]] == [o["sectionId"] for o in req["offered"]]
+
+
+@pytest.mark.urs("OCP-01", "OCP-02", "WF-01", "AI-01")
+def test_a_reason_picked_from_an_excel_ocaps_rows_offers_that_row_and_its_exact_source(make_client, plant):
+    owner = make_client()
+    manager = make_client(roles=["MANAGER"])
+    sealer = upload(manager, samples.sealer_xlsx(), "OCAP-040", "Sealer OCAP and troubleshooting", "sealer.xlsx")
+    _, event = open_mismatch(owner, plant)  # Vertical 1's HMI setpoint raised: 222 against 180
+    op = operator(make_client)
+    (req,) = op.get(REQUESTS).json()["requests"]
+    assert req["choices"] == []  # a Draft offers no reasons
+    activate(manager, sealer)
+    (req,) = op.get(REQUESTS).json()["requests"]
+    labels = [c["label"] for c in req["choices"]]
+    assert labels[0] == "Seal separates easily" and "Burnt or brittle seal" not in labels  # raised: not the "too high" row
+    picked = req["choices"][0]
+    op.post(f"{REQUESTS}/{req['id']}/reason", json={"sectionId": picked["sectionId"], "note": ""})
+    req = op.post(f"{REQUESTS}/{req['id']}/answers", json={"answers": ["Waited for the heater", "No"]}).json()
+    assert [o["sectionId"] for o in req["offered"]] == [picked["sectionId"]]  # one match, plus "None of these apply"
+
+    section = op.get(f"{OCAPS}/sections/{picked['sectionId']}").json()
+    as_read = next(s for s in sealer["sections"] if s["id"] == picked["sectionId"])
+    assert (section["body"], section["sheet"], section["rowFrom"]) == (as_read["body"], "Troubleshooting", 4)
+    assert section["citation"] == "OCAP-040 v1 · 1. Seal separates easily · Troubleshooting, row 4"
+    op.post(f"{REQUESTS}/{req['id']}/ocap", json={"sectionId": picked["sectionId"]})
+    done = op.post(f"{REQUESTS}/{req['id']}/acknowledge").json()
+    assert done["status"] == "done" and done["entries"][0]["body"] == "Seal separates easily"
+    evidence = owner.get(f"/api/v1/events/{event['id']}").json()["requests"][0]
+    assert evidence["entries"][0]["section"]["sectionId"] == picked["sectionId"]
 
 
 @pytest.mark.urs("OCP-03")
